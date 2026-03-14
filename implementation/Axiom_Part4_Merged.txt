@@ -1,0 +1,292 @@
+AXIOM
+Build Specification — Part 4 of 4
+Deployment · Error Handling · Security · Build Order · Demo Script · Judge Q&A
+Section 44 — Complete Error Handling Matrix
+Every error the system can produce has a defined HTTP status, error code, and user-facing message. All handled in error.middleware.ts.
+Scenario
+HTTP
+Error Code
+Message
+Missing/invalid JWT
+401
+unauthorized
+Authentication required
+Expired access token
+401
+token_expired
+Session expired. Please log in again
+Insufficient global role
+403
+forbidden
+Insufficient role
+Insufficient room role
+403
+room_forbidden
+You are not a moderator of this room
+Room not found
+404
+room_not_found
+Room does not exist
+User not found
+404
+user_not_found
+User does not exist
+Not a room member
+403
+not_member
+You are not a member of this room
+User already in room
+409
+already_member
+User is already in this room
+Username/email taken
+409
+conflict
+Username or email already in use
+Cannot kick yourself
+400
+invalid_target
+You cannot kick yourself
+Cannot change superadmin role
+403
+protected_role
+Superadmin role cannot be changed
+Rate limit exceeded
+429
+rate_limit_exceeded
+Too many messages. Wait 60 seconds
+Message too long (>4000)
+400
+message_too_long
+Message exceeds 4000 character limit
+Unknown command
+200 (system)
+—
+> Unknown command. Type /help for a list
+Command permission denied
+200 (system)
+—
+> You do not have permission for this command
+Blockchain write failed
+200
+—
+Action succeeded. Audit log pending.
+Database error
+500
+internal_error
+Something went wrong. Please try again
+Redis unavailable
+503
+service_unavailable
+Service temporarily unavailable
+Blockchain failures MUST return HTTP 200 with the action success. Only the blockchain write is degraded — the platform runs perfectly without it. Never return 500 for a blockchain circuit breaker open event.
+Section 45 — Security Checklist
+Every item on this list must be implemented before deployment.
+HTTP Security
+Helmet.js enabled on all routes
+CORS restricted to specific origins — no wildcard * in production
+All cookies: httpOnly: true, secure: true (production), sameSite: strict
+Rate limiting per user AND per IP — separate limiters for messages and commands
+express-request-id — every request gets a unique ID for tracing
+app.set("trust proxy", 1) — required for Render deployment and rate limiting
+No sensitive data in URL query params
+Authentication
+Passwords hashed with bcrypt, rounds: 12 — never store plaintext
+JWT secrets minimum 32 characters, randomly generated, different for access and refresh
+Access tokens expire in 15 minutes
+Refresh token rotation on every refresh — old token invalidated in DB
+Refresh tokens in httpOnly cookies, never in localStorage
+On logout: clear cookie AND invalidate refresh token in DB
+Role Enforcement
+Role is ALWAYS read from the verified JWT (req.user.role) — never from the request body
+Server-side check on every Socket.io event — client-side role checks are decorative only
+Superadmin role cannot be assigned via API — seed script only
+Room membership verified on every message send and room action
+Command permissions checked inside every command handler, not just at route level
+Two-tier permission check: global role AND room-local role must both be satisfied
+Input Validation
+Every request body validated with Zod schema before any processing
+Username: alphanumeric + underscores, 3-20 chars
+Message content: max 4000 characters, stripped of null bytes, trimmed
+Room names: lowercase alphanumeric + hyphens, 3-30 chars, must start with a letter
+UUID format validated for all :id parameters
+Parameterised queries only — never concatenate user input into SQL
+Blockchain Key Security
+Deployer private key stored in .env only — never committed to git
+POLYGON_PRIVATE_KEY is testnet-only — no real ETH involved
+.gitignore must include: .env, backend/.env, frontend/.env.local, node_modules, dist
+Section 46 — Deployment
+Deploy Backend to Render
+Go to render.com — create a new Web Service
+Connect GitHub repository: https://github.com/anushkamali-2005/Axiom.git
+Root directory: backend
+Runtime: Node 20
+Build command: npm install && npm run build
+Start command: node dist/index.js
+Health check path: /api/health
+Add all environment variables from Section 9 in the Environment tab
+Set NODE_ENV=production, FRONTEND_URL=https://your-project.vercel.app
+Enable Auto-Deploy from main branch
+After deploy: test GET https://your-backend.onrender.com/api/health — all three services must return ok
+Run seed: in Render shell, run: node dist/seed.js
+Render free tier spins down after 15 minutes of inactivity. For demos, ping /api/health every 10 minutes via cron-job.org to keep the instance warm.
+backend/Dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY dist/ ./dist/
+EXPOSE 4000
+CMD ["node", "dist/index.js"]
+Deploy Frontend to Vercel
+Go to vercel.com — import project from GitHub
+Repository: https://github.com/anushkamali-2005/Axiom.git
+Root directory: frontend
+Framework preset: Next.js
+Add environment variables:
+NEXT_PUBLIC_API_URL = https://your-backend.onrender.com
+NEXT_PUBLIC_SOCKET_URL = https://your-backend.onrender.com
+Deploy — Vercel auto-detects Next.js config
+After deploy: verify login works end-to-end
+Docker Compose — Local Development
+version: '3.8'
+services:
+  backend:
+    build: ./backend
+    ports: ['4000:4000']
+    env_file: ./backend/.env
+    environment: [NODE_ENV=development]
+  frontend:
+    build: ./frontend
+    ports: ['3000:3000']
+    env_file: ./frontend/.env.local
+    depends_on: [backend]
+Section 47 — Build Order (16 Steps)
+Follow in this exact order to avoid import errors and missing dependencies.
+git init + create monorepo structure: Axiom/, backend/, frontend/, contracts/
+Create .gitignore: .env, backend/.env, frontend/.env.local, node_modules, dist
+Write types/index.ts in both backend/src/types/ and frontend/types/ — identical content
+Write backend/src/config/env.ts — test that it exits on missing vars
+Write backend/src/lib/logger.ts, errors.ts, redis/client.ts, config/supabase.ts
+Run all SQL migrations in Supabase SQL editor (7 steps from Section 6 of Part 1)
+Write backend/src/crypto/e2ee.ts and crypto/tokens.ts
+Write backend/src/blockchain/abi.ts and blockchain/service.ts — test getEventCount() manually
+Write backend/src/middleware/ — auth, permission, error middleware
+Write backend/src/services/ — presence.service.ts and audit.service.ts
+Write backend/src/commands/ — parser.ts, registry.ts, all handlers
+Write backend/src/controllers/ — auth, room, message, user
+Write backend/src/routes/ and backend/src/socket/index.ts
+Write backend/src/index.ts and seed.ts — npm run build — fix TypeScript errors — run seed
+Build frontend: auth pages, providers, stores, socket hook, chat components, admin panel
+npm run build in frontend — fix TypeScript errors — deploy backend to Render — deploy frontend to Vercel — run demo checklist
+Section 48 — Pre-Demo Checklist
+Run every item before your demo slot. Nothing should be left to chance.
+Backend
+npm run build completes with zero TypeScript errors
+All environment variables set correctly in Render dashboard
+GET /api/health returns 200 with redis: ok, database: ok, blockchain: ok
+Seed script has run: superadmin exists, #general, #engineering, #announcements exist
+Blockchain connection verified: getEventCount() returns without error
+Rate limiting tested: rapid messages trigger rate limit error correctly
+Role middleware tested: member attempting /promote gets system error message
+Circuit breaker tested: temporarily wrong RPC URL — server does not crash
+Frontend
+npm run build completes without errors
+Login with superadmin credentials works end-to-end
+Room list shows three default rooms
+Messages appear instantly in all open tabs on send
+Online dot turns green when user connects, grey on disconnect (within 30 seconds)
+OWNER badge shows in red for superadmin, MOD badge in amber for moderator
+/help command returns system message with command list
+/kick command works for moderator, is rejected for plain member
+Admin panel opens when clicking Admin button — shows Audit Log tab
+Polygonscan links in Audit Log are clickable and open amoy.polygonscan.com
+Demo Environment Setup
+4 browser tabs open: 1 superadmin, 1 moderator, 2 plain members
+All users pre-logged in and already in #general room
+Pino pretty-print logs visible in a terminal window
+Browser tab open: https://amoy.polygonscan.com/address/0xd9145CCE52D386f254917e481eB44e9943F39138
+Perform one test admin action before the demo — so at least one on-chain event exists in the audit log
+Section 49 — Demo Script
+Practice this until it takes under 4 minutes. Each step flows naturally into the next. Say the exact phrases — they are designed to make judges nod.
+Step 1 — Set the Stage (30 seconds)
+"We built Axiom — an internal communications platform with a real role hierarchy. We're going to show you a system where not everyone holds equal power, and where every administrative action leaves an immutable trail."
+Point to the 4 browser tabs. Identify each: superadmin (red OWNER badge), moderator (amber MOD badge), two plain members (no badge). Let the judges see the visual hierarchy before anything else.
+Step 2 — Show Real-Time (45 seconds)
+Send a message from the member tab: "Hello from #general"
+Point to all 4 tabs receiving the message instantly
+Send from the superadmin tab. Show the red OWNER badge appearing in the message
+Start typing in one tab. Show the typing indicator appearing in all others
+Disconnect one member tab (close it). Show the online dot turning grey within 30 seconds in all other tabs
+Reconnect the tab. Show the dot turning green
+"Under 100ms delivery via Socket.io. No polling, no refresh."
+Step 3 — Show Role Enforcement (1 minute)
+From the plain member tab: type /promote @moderator superadmin
+Show the system message: "> You do not have permission for this command"
+From the moderator tab: type /kick @member2
+Show member2 receiving the kick event — browser redirects to /chat
+Show the system message in the room: "> member2 was removed from this room"
+From superadmin tab: type /promote @member1 moderator
+Show member1's badge updating live to MOD in all connected tabs without refresh
+"The role system is enforced server-side on every action. The client can never fake a role — the JWT signature catches it. Same check runs on every Socket.io event."
+Step 4 — Show the Blockchain Trail (45 seconds — THE DEMO MOMENT)
+Click the Admin button in the room header. Show the Admin Panel — Audit Log tab is open by default.
+Point to the ROLE_CHANGE event for the promotion just performed
+Show the tx_hash column — a real transaction hash
+Click the Polygonscan link. Browser opens amoy.polygonscan.com showing the live transaction
+Point to: the timestamp set by the blockchain, the contract address, the input data hash
+"This event was written to Polygon Amoy testnet. It lives permanently on the blockchain. Not even the superadmin can delete this record. Any auditor in the world can verify it independently."
+Step 5 — Show Multi-Room (30 seconds)
+From superadmin tab: type /create-room #security-alerts
+Show the new room appearing in the sidebar instantly
+Join from the moderator tab. Show real-time member count update
+Send a message in #security-alerts — confirm it does NOT appear in #general
+"Rooms are fully independent. Members, messages, and permissions are all scoped. The system can grow to any number of rooms."
+Step 6 — Close (15 seconds)
+"Instant messages. Enforced hierarchy. Immutable audit trail. Three things. Every line of code we wrote serves exactly one of them."
+Section 50 — Judge Q&A
+Know these answers before you walk into the room. Do not read from notes.
+Q: How do you enforce roles — couldn't a client fake their role?
+A: The role lives in the JWT, which is signed with a secret key only the server knows. Even if a client modifies the token payload, the signature verification fails and the request is rejected with 401. Role is never read from the request body — only from the decoded, verified token. The exact same check runs on every Socket.io event via the auth middleware that attaches the user to socket.data on connection.
+Q: Why blockchain for an internal messaging app?
+A: Audit logs in Postgres are mutable — any database admin can run DELETE FROM audit_log. We use Polygon Amoy for admin actions because those are the events that need permanent accountability. Once a transaction is confirmed, no one can alter it, including us. Judges can open amoy.polygonscan.com right now and independently verify every admin action that happened during this demo. We don't use it for messages — only for low-frequency, high-stakes events.
+Q: What happens if the Polygon RPC is down?
+A: The circuit breaker opens after 3 failures in the 60-second window. The administrative action already succeeded before the blockchain write was attempted. The blockchain call is async, fire-and-forget. The tx_hash column in audit_log stays null until the chain recovers, at which point retries resume. The chat platform never goes down because of a blockchain issue. Users never see any degraded experience.
+Q: How does the presence system work? What if the server crashes?
+A: Presence is stored in Redis with a 30-second TTL. The client sends a heartbeat via Socket.io every 20 seconds, which refreshes the TTL. If the server crashes, no process refreshes the TTL. All presence keys expire naturally within 30 seconds and all users appear offline. On reconnect, the client re-authenticates and the server sets their presence key again. There is no stale "online" state that persists across crashes.
+Q: What prevents someone from calling /promote via a raw API call?
+A: The PATCH /api/users/:id/role endpoint has requireRole("superadmin") middleware applied at the router level, before the handler runs. Any JWT without the superadmin role gets a 403. The middleware is tested independently. It cannot be accidentally omitted — it wraps the entire route, not just the handler. Socket.io commands have the same check run inside the handler itself.
+Q: What is the room-local role system for?
+A: It lets a global member be the owner or moderator of their specific room. For example, a team lead who doesn't need platform-wide moderator powers can still manage their own team's room. Global role always takes precedence — a global moderator doesn't lose their platform-wide kick ability just because they're a local member somewhere. The two tiers are additive. Both must be satisfied on every room action.
+Q: Can the system scale beyond one server?
+A: Yes, with one addition: @socket.io/redis-adapter. Currently Socket.io events are scoped to one process. In a multi-instance deployment, the Redis adapter broadcasts events through Redis pub/sub to all server instances. Supabase and Upstash are already external services shared across any number of instances. The architecture is horizontally scalable — the adapter is a single import.
+Q: How do commands avoid being a security risk?
+A: Commands are parsed and executed entirely server-side. The client sends them as plain message strings starting with /. The server detects the prefix, routes to the command engine, and never broadcasts the raw command to the room — only the system message output. Every command handler checks the caller's role internally and throws if the actor lacks required permissions. A user cannot inject a command that bypasses permission checks because all checks live inside the server-side handlers.
+Q: Why Supabase?
+A: Three reasons: managed PostgreSQL with a connection pooler at the free tier, which matters for hackathon deployment. A useful real-time dashboard for inspecting the DB during the demo. And the JS client reduces boilerplate for standard queries while still supporting raw SQL for complex role checks. It is not a lock-in — the entire system works with any PostgreSQL-compatible database.
+Section 51 — Final Implementation Notes
+These are the details that separate a complete implementation from a half-finished one.
+Every async function must have a try-catch. No unhandled promise rejections.
+Every Socket.io event handler must be wrapped in try-catch and emit an error event on failure.
+TypeScript strict mode enabled. No use of "any" type anywhere.
+All database queries use parameterised inputs. Never concatenate user input into SQL.
+The /api/health endpoint must NOT require authentication. Judges will test it first.
+The audit_log table is append-only. There must be no DELETE or UPDATE routes for it.
+The superadmin role can only be assigned via the seed script, never via the API.
+Room names must be unique across the platform. Enforced with UNIQUE constraint + 409 response.
+Message content must be sanitised: strip null bytes (\0), enforce max 4000 chars, trim whitespace.
+Socket.io must work over HTTPS on Render. CORS config is inside the Server constructor.
+Every role badge in the UI must come from the JWT payload — never from a client-side store that could drift.
+The command autocomplete dropdown must only show commands the user has permission to execute.
+Blockchain writes are always fire-and-forget. Never await them in a request handler.
+Circuit breaker: 15s timeout, 50% error threshold, 60s reset window, 3 call volume minimum.
+THE ONE THING THAT MUST NEVER HAPPEN: A plain member must never be able to perform a moderator or superadmin action. If you demo the platform and a member successfully kicks another user or promotes themselves, the demo is over. Test every role combination before the presentation, not during it. The role system is the puzzle. The judges are watching it specifically. Get it right.
+End of Part 4 — Complete Build Specification
+All four parts together constitute the complete Axiom build specification.
+Part 1: Project identity, problem statement, blockchain and crypto rationale, full tech stack, monorepo structure, complete database schema, role and permission system, command engine, environment variables, smart contract + ABI.
+Part 2: Complete backend — every TypeScript type, env validation, all services, blockchain service with circuit breaker, all controllers, socket handler, all routes, seed script, package.json.
+Part 3: Complete frontend — design system with Geist font, all stores, socket hook, auth pages, chat layout, all message components, admin panel with Audit Log (Polygonscan links), UserManager, package.json.
+Part 4: Error handling matrix, security checklist, deployment (Render + Vercel), Docker Compose, 16-step build order, pre-demo checklist, 6-step demo script, 9 judge Q&A answers.
+Repository: https://github.com/anushkamali-2005/Axiom.git — push to this repo after scaffolding. Frontend deploys from /frontend to Vercel. Backend deploys from /backend to Render. Contract is already live at 0xd9145CCE52D386f254917e481eB44e9943F39138 on Polygon Amoy — do not redeploy.
+Instant messages. Enforced hierarchy. Immutable audit trail.
+Three things. Every line of code serves exactly one of them.

@@ -1,0 +1,821 @@
+AXIOM
+Build Specification — Part 2 of 4
+Complete Backend Implementation — Every File, Every Function
+ANTIGRAVITY INSTRUCTION: Every file in backend/src/ is fully specified in this part. Copy every code block exactly. File paths are shown before each block. No TODOs, no placeholders — every function is complete and copy-paste ready.
+Section 11 — TypeScript Types (Shared)
+Create this file at both backend/src/types/index.ts and frontend/types/index.ts with identical content.
+export type GlobalRole = 'superadmin' | 'moderator' | 'member';
+export type LocalRole = 'owner' | 'moderator' | 'member';
+export const ROLE_WEIGHT: Record<GlobalRole, number> = {
+  member: 0, moderator: 1, superadmin: 2
+};
+export interface User {
+  id: string; username: string; email: string;
+  role: GlobalRole; publicKey?: string;
+  isOnline: boolean; lastSeen: string; createdAt: string;
+}
+export interface Room {
+  id: string; name: string; description?: string;
+  isPrivate: boolean; createdBy: string;
+  isArchived: boolean; createdAt: string;
+  memberCount?: number;
+}
+export interface RoomMember {
+  userId: string; username: string;
+  role: GlobalRole; localRole: LocalRole;
+  isOnline: boolean; joinedAt: string;
+}
+export interface Message {
+  id: string; roomId: string;
+  senderId: string; senderUsername: string; senderRole: GlobalRole;
+  content: string; isCommand: boolean; isSystem: boolean;
+  editedAt?: string; deletedAt?: string; createdAt: string;
+}
+export interface DirectMessage {
+  id: string; senderId: string; recipientId: string;
+  ciphertext: string; nonce: string; createdAt: string;
+  decryptedContent?: string;
+}
+export interface AuditEvent {
+  id: number; event: string;
+  actorId: string; targetId?: string; roomId?: string;
+  metadata?: Record<string, unknown>;
+  txHash?: string; onChain: boolean; createdAt: string;
+}
+export interface JwtPayload {
+  userId: string; username: string;
+  role: GlobalRole; iat: number; exp: number;
+}
+export interface ParsedCommand { command: string; args: string[]; }
+export interface CommandContext {
+  actor: JwtPayload; room: Room;
+  socket: import('socket.io').Socket;
+  io: import('socket.io').Server;
+}
+Section 12 — backend/src/config/env.ts
+Validates all environment variables at startup using Zod. Exits the process immediately on any missing or invalid variable. Import this first in index.ts.
+import { z } from 'zod';
+const envSchema = z.object({
+  PORT: z.string().default('4000'),
+  NODE_ENV: z.enum(['development','production','test']).default('development'),
+  FRONTEND_URL: z.string().url(),
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_ANON_KEY: z.string().min(1),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  UPSTASH_REDIS_REST_URL: z.string().url(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
+  JWT_ACCESS_SECRET: z.string().min(32),
+  JWT_REFRESH_SECRET: z.string().min(32),
+  JWT_ACCESS_EXPIRY: z.string().default('15m'),
+  JWT_REFRESH_EXPIRY: z.string().default('7d'),
+  POLYGON_RPC_URL: z.string().url(),
+  POLYGON_CHAIN_ID: z.string(),
+  POLYGON_PRIVATE_KEY: z.string().min(64),
+  POLYGON_CONTRACT_ADDRESS: z.string().startsWith('0x'),
+  SUPERADMIN_EMAIL: z.string().email(),
+  SUPERADMIN_PASSWORD: z.string().min(12),
+  SUPERADMIN_USERNAME: z.string().min(3),
+});
+const result = envSchema.safeParse(process.env);
+if (!result.success) {
+  console.error('Environment validation failed:');
+  console.error(result.error.flatten().fieldErrors);
+  process.exit(1);
+}
+export const env = result.data;
+Section 13 — backend/src/config/supabase.ts
+import { createClient } from '@supabase/supabase-js';
+import { env } from './env';
+export const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+Always use SUPABASE_SERVICE_ROLE_KEY on the backend — this bypasses Row Level Security. Never expose this key in the frontend.
+Section 14 — backend/src/redis/client.ts
+import { Redis } from '@upstash/redis';
+import { env } from '../config/env';
+export const redis = new Redis({ url: env.UPSTASH_REDIS_REST_URL, token: env.UPSTASH_REDIS_REST_TOKEN });
+Section 15 — backend/src/lib/logger.ts
+import pino from 'pino';
+import { env } from '../config/env';
+export const logger = pino({
+  level: env.NODE_ENV === 'production' ? 'info' : 'debug',
+  ...(env.NODE_ENV !== 'production' && {
+    transport: { target: 'pino-pretty', options: { colorize: true } }
+  })
+});
+Every log call must use this exact structure:
+logger.info({
+  event: 'message.sent',   // Always: category.action
+  userId: 'uuid',
+  roomId: 'uuid',
+  role: 'member',
+  latencyMs: 12,
+  requestId: req.id,
+  timestamp: new Date().toISOString()
+});
+Section 16 — backend/src/lib/errors.ts
+export class AppError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string
+  ) { super(message); this.name = 'AppError'; }
+}
+export const Errors = {
+  unauthorized: () => new AppError(401, 'unauthorized', 'Authentication required'),
+  tokenExpired: () => new AppError(401, 'token_expired', 'Session expired. Please log in again'),
+  forbidden: () => new AppError(403, 'forbidden', 'Insufficient role'),
+  roomForbidden: () => new AppError(403, 'room_forbidden', 'Insufficient room role'),
+  notMember: () => new AppError(403, 'not_member', 'You are not a member of this room'),
+  roomNotFound: () => new AppError(404, 'room_not_found', 'Room does not exist'),
+  userNotFound: () => new AppError(404, 'user_not_found', 'User does not exist'),
+  alreadyMember: () => new AppError(409, 'already_member', 'User is already in this room'),
+  conflict: () => new AppError(409, 'conflict', 'Username or email already in use'),
+  invalidTarget: () => new AppError(400, 'invalid_target', 'You cannot kick yourself'),
+  protectedRole: () => new AppError(403, 'protected_role', 'Superadmin role cannot be changed'),
+  messageTooLong: () => new AppError(400, 'message_too_long', 'Message exceeds 4000 character limit'),
+  rateLimitExceeded: () => new AppError(429, 'rate_limit_exceeded', 'Too many messages. Wait 60 seconds'),
+};
+Section 17 — backend/src/crypto/tokens.ts
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
+import { GlobalRole, JwtPayload } from '../types';
+export function signAccessToken(p: { userId: string; username: string; role: GlobalRole }): string {
+  return jwt.sign(p, env.JWT_ACCESS_SECRET, { expiresIn: env.JWT_ACCESS_EXPIRY } as jwt.SignOptions);
+}
+export function signRefreshToken(p: { userId: string }): string {
+  return jwt.sign(p, env.JWT_REFRESH_SECRET, { expiresIn: env.JWT_REFRESH_EXPIRY } as jwt.SignOptions);
+}
+export function verifyAccessToken(token: string): JwtPayload {
+  return jwt.verify(token, env.JWT_ACCESS_SECRET) as JwtPayload;
+}
+export function verifyRefreshToken(token: string): { userId: string } {
+  return jwt.verify(token, env.JWT_REFRESH_SECRET) as { userId: string };
+}
+Section 18 — backend/src/crypto/e2ee.ts
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import crypto from 'crypto';
+export function generateKeypair() {
+  const kp = nacl.box.keyPair();
+  return { publicKey: encodeBase64(kp.publicKey), secretKey: encodeBase64(kp.secretKey) };
+}
+export async function encryptPrivateKey(secretKey: string, password: string) {
+  const salt = crypto.randomBytes(32);
+  const dk = await scryptKey(password, salt);
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+  const encrypted = nacl.secretbox(decodeBase64(secretKey), nonce, dk);
+  return {
+    encrypted: encodeBase64(encrypted) + '.' + encodeBase64(nonce),
+    salt: encodeBase64(salt),
+  };
+}
+async function scryptKey(password: string, salt: Buffer): Promise<Uint8Array> {
+  return new Promise((res, rej) =>
+    crypto.scrypt(password, salt, 32, (err, key) => err ? rej(err) : res(new Uint8Array(key)))
+  );
+}
+Section 19 — backend/src/middleware/auth.middleware.ts
+import { Request, Response, NextFunction } from 'express';
+import { verifyAccessToken } from '../crypto/tokens';
+import { JwtPayload } from '../types';
+declare global { namespace Express { interface Request { user?: JwtPayload; } } }
+export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'unauthorized', message: 'Authentication required' }); return;
+  }
+  try {
+    req.user = verifyAccessToken(header.split(' ')[1]);
+    next();
+  } catch (e: unknown) {
+    const expired = e instanceof Error && e.name === 'TokenExpiredError';
+    res.status(401).json({
+      error: expired ? 'token_expired' : 'unauthorized',
+      message: expired ? 'Session expired. Please log in again' : 'Invalid token'
+    });
+  }
+}
+Section 20 — backend/src/middleware/error.middleware.ts
+import { Request, Response, NextFunction } from 'express';
+import { AppError } from '../lib/errors';
+import { logger } from '../lib/logger';
+export function errorMiddleware(err: AppError, req: Request, res: Response, _next: NextFunction) {
+  const status = err.status || 500;
+  const code = err.code || 'internal_error';
+  const message = err.message || 'Something went wrong';
+  logger.error({ event: 'request.error', status, code, path: req.path, userId: req.user?.userId, message });
+  res.status(status).json({ error: code, message, requestId: req.id });
+}
+Section 21 — backend/src/services/presence.service.ts
+import { redis } from '../redis/client';
+const KEY = (id: string) => `presence:${id}`;
+const TTL = 30; // seconds — matches heartbeat interval
+export async function setOnline(userId: string, socketId: string) {
+  await redis.set(KEY(userId), socketId, { ex: TTL });
+}
+export async function heartbeat(userId: string) {
+  await redis.expire(KEY(userId), TTL);
+}
+export async function setOffline(userId: string) {
+  await redis.del(KEY(userId));
+}
+export async function isOnline(userId: string): Promise<boolean> {
+  return (await redis.exists(KEY(userId))) === 1;
+}
+export async function getOnlineBatch(userIds: string[]): Promise<Record<string, boolean>> {
+  if (!userIds.length) return {};
+  const vals = await redis.mget<string[]>(...userIds.map(KEY));
+  return Object.fromEntries(userIds.map((id, i) => [id, vals[i] !== null]));
+}
+If the server crashes, no process will refresh the TTL. All presence keys expire naturally within 30 seconds — no stale "online" state persists across crashes.
+Section 22 — backend/src/services/audit.service.ts
+Dual-write pattern: Postgres immediately (synchronous), blockchain async (fire-and-forget via circuit breaker).
+import { supabase } from '../config/supabase';
+import { writeAuditEventToBlockchain } from '../blockchain/service';
+import { logger } from '../lib/logger';
+interface AuditParams {
+  event: string; actorId: string; targetId?: string;
+  roomId?: string; metadata?: Record<string, unknown>;
+}
+export async function writeAuditEvent(params: AuditParams): Promise<void> {
+  // Step 1: Write to Postgres immediately — always succeeds or logs error
+  const { data: row, error } = await supabase.from('audit_log').insert({
+    event: params.event, actor_id: params.actorId,
+    target_id: params.targetId || null,
+    room_id: params.roomId || null,
+    metadata: params.metadata || null,
+    on_chain: false,
+  }).select().single();
+  if (error) { logger.error({ event: 'audit.db_write_failed', error }); return; }
+  // Step 2: Blockchain write async — NEVER awaited. Never blocks main flow.
+  writeAuditEventToBlockchain(params.event, params.actorId,
+    params.targetId || params.actorId, params.metadata || {})
+    .then(async (txHash) => {
+      if (txHash && row) {
+        await supabase.from('audit_log')
+          .update({ tx_hash: txHash, on_chain: true }).eq('id', row.id);
+        logger.info({ event: 'blockchain.audit.written', txHash, auditEvent: params.event });
+      }
+    })
+    .catch(err => logger.warn({ event: 'blockchain.audit.failed', error: err.message }));
+}
+export async function getAuditLog(roomId?: string, limit = 20) {
+  let q = supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(limit);
+  if (roomId) q = q.eq('room_id', roomId);
+  const { data } = await q;
+  return data || [];
+}
+Section 23 — backend/src/blockchain/service.ts
+import { ethers } from 'ethers';
+import CircuitBreaker from 'opossum';
+import { AUDIT_LOG_ABI } from './abi';
+import { env } from '../config/env';
+import { logger } from '../lib/logger';
+const provider = new ethers.JsonRpcProvider(env.POLYGON_RPC_URL);
+const wallet = new ethers.Wallet(env.POLYGON_PRIVATE_KEY, provider);
+const contract = new ethers.Contract(env.POLYGON_CONTRACT_ADDRESS, AUDIT_LOG_ABI, wallet);
+async function _write(eventType: string, actorId: string, targetId: string, meta: object) {
+  const aHash = ethers.keccak256(ethers.toUtf8Bytes(actorId));
+  const tHash = ethers.keccak256(ethers.toUtf8Bytes(targetId));
+  const dHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(meta)));
+  const tx = await contract.logEvent(eventType, aHash, tHash, dHash);
+  const receipt = await tx.wait();
+  return receipt.hash as string;
+}
+const breaker = new CircuitBreaker(_write, {
+  timeout: 15000, errorThresholdPercentage: 50,
+  resetTimeout: 60000, volumeThreshold: 3,
+});
+breaker.on('open', () => logger.warn({ event: 'blockchain.circuit_open' }));
+breaker.on('close', () => logger.info({ event: 'blockchain.circuit_closed' }));
+export async function writeAuditEventToBlockchain(
+  eventType: string, actorId: string, targetId: string, meta: object
+): Promise<string | null> {
+  try { return await breaker.fire(eventType, actorId, targetId, meta) as string; }
+  catch { return null; }
+}
+export async function getAuditTrailFromChain(count = 20) {
+  try {
+    const total = Number(await contract.getEventCount());
+    const events = [];
+    for (let i = Math.max(0, total - count); i < total; i++) {
+      const e = await contract.getEvent(i);
+      events.push({ index: i, eventType: e.eventType,
+        timestamp: new Date(Number(e.timestamp) * 1000).toISOString() });
+    }
+    return events;
+  } catch { return []; }
+}
+Section 24 — backend/src/controllers/auth.controller.ts
+import { Request, Response } from 'express';
+import bcrypt from 'bcrypt';
+import { z } from 'zod';
+import { supabase } from '../config/supabase';
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../crypto/tokens';
+import { generateKeypair, encryptPrivateKey } from '../crypto/e2ee';
+import { logger } from '../lib/logger';
+const registerSchema = z.object({
+  username: z.string().min(3).max(20).regex(/^[a-zA-Z0-9_]+$/),
+  email: z.string().email(),
+  password: z.string().min(8).max(128),
+});
+const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
+const COOKIE = { httpOnly: true, secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const, maxAge: 7 * 24 * 60 * 60 * 1000 };
+export async function register(req: Request, res: Response): Promise<void> {
+  const parse = registerSchema.safeParse(req.body);
+  if (!parse.success) { res.status(400).json({ error: 'validation_error', details: parse.error.flatten() }); return; }
+  const { username, email, password } = parse.data;
+  try {
+    const { data: ex } = await supabase.from('users').select('id')
+      .or(`email.eq.${email},username.eq.${username}`).single();
+    if (ex) { res.status(409).json({ error: 'conflict', message: 'Username or email already in use' }); return; }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const kp = generateKeypair();
+    const { encrypted, salt } = await encryptPrivateKey(kp.secretKey, password);
+    const { data: user, error } = await supabase.from('users').insert({
+      username, email, password_hash: passwordHash, role: 'member',
+      public_key: kp.publicKey, encrypted_private_key: encrypted, key_salt: salt,
+    }).select().single();
+    if (error || !user) { res.status(500).json({ error: 'internal_error', message: 'Registration failed' }); return; }
+    const refreshToken = signRefreshToken({ userId: user.id });
+    await supabase.from('users').update({ refresh_token: refreshToken }).eq('id', user.id);
+    const accessToken = signAccessToken({ userId: user.id, username: user.username, role: user.role });
+    res.cookie('refreshToken', refreshToken, COOKIE);
+    res.status(201).json({ user: { id: user.id, username: user.username, email: user.email, role: user.role }, accessToken });
+    logger.info({ event: 'auth.register', userId: user.id });
+  } catch (e) { res.status(500).json({ error: 'internal_error', message: 'Registration failed' }); }
+}
+export async function login(req: Request, res: Response): Promise<void> {
+  const parse = loginSchema.safeParse(req.body);
+  if (!parse.success) { res.status(400).json({ error: 'validation_error', details: parse.error.flatten() }); return; }
+  const { email, password } = parse.data;
+  try {
+    const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      res.status(401).json({ error: 'unauthorized', message: 'Invalid credentials' }); return;
+    }
+    const accessToken = signAccessToken({ userId: user.id, username: user.username, role: user.role });
+    const refreshToken = signRefreshToken({ userId: user.id });
+    await supabase.from('users').update({ refresh_token: refreshToken, last_seen: new Date().toISOString() }).eq('id', user.id);
+    res.cookie('refreshToken', refreshToken, COOKIE);
+    res.status(200).json({
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
+      accessToken,
+      encryptedPrivateKey: user.encrypted_private_key,
+      keySalt: user.key_salt,
+    });
+    logger.info({ event: 'auth.login', userId: user.id, role: user.role });
+  } catch (e) { res.status(500).json({ error: 'internal_error', message: 'Login failed' }); }
+}
+export async function refresh(req: Request, res: Response): Promise<void> {
+  const token = req.cookies?.refreshToken;
+  if (!token) { res.status(401).json({ error: 'unauthorized', message: 'No refresh token' }); return; }
+  try {
+    const { userId } = verifyRefreshToken(token);
+    const { data: user } = await supabase.from('users').select('*').eq('id', userId).single();
+    if (!user || user.refresh_token !== token) {
+      res.status(401).json({ error: 'unauthorized', message: 'Refresh token invalid or reused' }); return;
+    }
+    const newAccessToken = signAccessToken({ userId: user.id, username: user.username, role: user.role });
+    const newRefreshToken = signRefreshToken({ userId: user.id });
+    await supabase.from('users').update({ refresh_token: newRefreshToken }).eq('id', user.id);
+    res.cookie('refreshToken', newRefreshToken, COOKIE);
+    res.status(200).json({ accessToken: newAccessToken });
+  } catch { res.clearCookie('refreshToken'); res.status(401).json({ error: 'token_expired', message: 'Session expired' }); }
+}
+export async function logout(req: Request, res: Response): Promise<void> {
+  const token = req.cookies?.refreshToken;
+  if (token) {
+    try {
+      const { userId } = verifyRefreshToken(token);
+      await supabase.from('users').update({ refresh_token: null }).eq('id', userId);
+    } catch {}
+  }
+  res.clearCookie('refreshToken');
+  res.status(200).json({ message: 'Logged out' });
+}
+Section 25 — backend/src/controllers/room.controller.ts
+import { Request, Response } from 'express';
+import { z } from 'zod';
+import { supabase } from '../config/supabase';
+import { writeAuditEvent } from '../services/audit.service';
+import { logger } from '../lib/logger';
+const createRoomSchema = z.object({
+  name: z.string().min(3).max(30).regex(/^[a-z][a-z0-9-]{2,29}$/),
+  description: z.string().max(256).optional(),
+  isPrivate: z.boolean().optional().default(false),
+});
+export async function createRoom(req: Request, res: Response): Promise<void> {
+  const parse = createRoomSchema.safeParse(req.body);
+  if (!parse.success) { res.status(400).json({ error: 'validation_error', details: parse.error.flatten() }); return; }
+  const { name, description, isPrivate } = parse.data;
+  const userId = req.user!.userId;
+  try {
+    const { data: existing } = await supabase.from('rooms').select('id').eq('name', name).single();
+    if (existing) { res.status(409).json({ error: 'conflict', message: 'Room name already taken' }); return; }
+    const { data: room, error } = await supabase.from('rooms')
+      .insert({ name, description, is_private: isPrivate, created_by: userId }).select().single();
+    if (error || !room) { res.status(500).json({ error: 'internal_error' }); return; }
+    await supabase.from('room_members').insert({ room_id: room.id, user_id: userId, local_role: 'owner' });
+    writeAuditEvent({ event: 'ROOM_CREATED', actorId: userId, targetId: room.id, metadata: { name } }).catch(() => {});
+    res.status(201).json({ room });
+    logger.info({ event: 'room.created', userId, roomId: room.id });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+export async function getRooms(req: Request, res: Response): Promise<void> {
+  const userId = req.user!.userId;
+  try {
+    const { data: rooms } = await supabase.from('rooms')
+      .select('*, room_members!inner(user_id)').eq('is_archived', false);
+    res.status(200).json({ rooms: rooms || [] });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+export async function joinRoom(req: Request, res: Response): Promise<void> {
+  const { id } = req.params;
+  const userId = req.user!.userId;
+  try {
+    const { data: room } = await supabase.from('rooms').select('*').eq('id', id).single();
+    if (!room) { res.status(404).json({ error: 'room_not_found', message: 'Room does not exist' }); return; }
+    if (room.is_archived) { res.status(410).json({ error: 'room_archived', message: 'Room is archived' }); return; }
+    await supabase.from('room_members').upsert({ room_id: id, user_id: userId, local_role: 'member' }, { onConflict: 'room_id,user_id' });
+    res.status(200).json({ message: 'Joined room' });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+export async function getRoomMembers(req: Request, res: Response): Promise<void> {
+  const { id } = req.params;
+  try {
+    const { data: members } = await supabase.from('room_members')
+      .select('local_role, joined_at, users(id, username, role, is_online)').eq('room_id', id);
+    res.status(200).json({ members: members || [] });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+Section 26 — backend/src/controllers/message.controller.ts
+import { Request, Response } from 'express';
+import { z } from 'zod';
+import { supabase } from '../config/supabase';
+export async function getMessages(req: Request, res: Response): Promise<void> {
+  const { id: roomId } = req.params;
+  const limit = Math.min(Number(req.query.limit) || 50, 100);
+  const before = req.query.before as string | undefined;
+  try {
+    let q = supabase.from('messages')
+      .select('id, content, is_command, is_system, created_at, edited_at, deleted_at, users(id, username, role)')
+      .eq('room_id', roomId).order('created_at', { ascending: false }).limit(limit);
+    if (before) q = q.lt('created_at', before);
+    const { data: messages } = await q;
+    res.status(200).json({ messages: (messages || []).reverse() });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+export async function deleteMessage(req: Request, res: Response): Promise<void> {
+  const { id: msgId } = req.params;
+  const userId = req.user!.userId;
+  try {
+    const { data: msg } = await supabase.from('messages').select('*').eq('id', msgId).single();
+    if (!msg) { res.status(404).json({ error: 'not_found', message: 'Message not found' }); return; }
+    const isOwn = msg.sender_id === userId;
+    const isMod = ['moderator', 'superadmin'].includes(req.user!.role);
+    if (!isOwn && !isMod) { res.status(403).json({ error: 'forbidden', message: 'Cannot delete this message' }); return; }
+    await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', msgId);
+    res.status(200).json({ message: 'Deleted' });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+Section 27 — backend/src/controllers/user.controller.ts
+import { Request, Response } from 'express';
+import { z } from 'zod';
+import { supabase } from '../config/supabase';
+import { writeAuditEvent } from '../services/audit.service';
+import { logger } from '../lib/logger';
+const roleSchema = z.object({ role: z.enum(['moderator', 'member']) });
+export async function getUsers(req: Request, res: Response): Promise<void> {
+  const { data: users } = await supabase.from('users')
+    .select('id, username, role, is_online, last_seen').order('username');
+  res.status(200).json({ users: users || [] });
+}
+export async function changeRole(req: Request, res: Response): Promise<void> {
+  const { id: targetId } = req.params;
+  const actorId = req.user!.userId;
+  const parse = roleSchema.safeParse(req.body);
+  if (!parse.success) { res.status(400).json({ error: 'validation_error' }); return; }
+  try {
+    const { data: target } = await supabase.from('users').select('*').eq('id', targetId).single();
+    if (!target) { res.status(404).json({ error: 'user_not_found' }); return; }
+    if (target.role === 'superadmin') { res.status(403).json({ error: 'protected_role', message: 'Superadmin role cannot be changed' }); return; }
+    const { role } = parse.data;
+    await supabase.from('users').update({ role }).eq('id', targetId);
+    writeAuditEvent({ event: 'ROLE_CHANGE', actorId, targetId, metadata: { newRole: role, username: target.username } }).catch(() => {});
+    res.status(200).json({ message: 'Role updated', role });
+    logger.info({ event: 'role.changed', actorId, targetId, role });
+  } catch (e) { res.status(500).json({ error: 'internal_error' }); }
+}
+Section 28 — backend/src/socket/index.ts
+Full Socket.io server setup. Every event handler is wrapped in try-catch. JWT verified on connection — socket.data.user is set and trusted for all subsequent events.
+import { Server } from 'socket.io';
+import { verifyAccessToken } from '../crypto/tokens';
+import { setOnline, setOffline, heartbeat } from '../services/presence.service';
+import { supabase } from '../config/supabase';
+import { parseCommand, executeCommand } from '../commands';
+import { logger } from '../lib/logger';
+import { env } from '../config/env';
+export function initSocket(httpServer: any) {
+  const io = new Server(httpServer, {
+    cors: { origin: [env.FRONTEND_URL, /\.vercel\.app$/], credentials: true },
+    transports: ['websocket', 'polling'],
+  });
+  // Auth middleware — runs before any event
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('unauthorized'));
+    try { socket.data.user = verifyAccessToken(token); next(); }
+    catch { next(new Error('unauthorized')); }
+  });
+  io.on('connection', async (socket) => {
+    const user = socket.data.user;
+    logger.info({ event: 'socket.connected', userId: user.userId });
+    await setOnline(user.userId, socket.id);
+    io.emit('presence:update', { userId: user.userId, isOnline: true });
+    socket.join(`user:${user.userId}`); // Personal room for DMs
+    socket.on('room:join', async ({ roomId }) => {
+      try {
+        const { data: member } = await supabase.from('room_members')
+          .select('id').eq('room_id', roomId).eq('user_id', user.userId).single();
+        if (!member) { socket.emit('error', { code: 'not_member', message: 'Join room via API first' }); return; }
+        socket.join(roomId);
+        io.to(roomId).emit('room:user_joined', { roomId, user: { id: user.userId, username: user.username, role: user.role } });
+        logger.info({ event: 'room.joined', userId: user.userId, roomId });
+      } catch (e: any) { socket.emit('error', { code: 'internal_error', message: e.message }); }
+    });
+    socket.on('room:leave', ({ roomId }) => {
+      socket.leave(roomId);
+      io.to(roomId).emit('room:user_left', { roomId, userId: user.userId });
+    });
+    socket.on('message:send', async ({ roomId, content }) => {
+      const start = Date.now();
+      try {
+        if (!content || content.trim().length === 0) return;
+        if (content.length > 4000) { socket.emit('error', { code: 'message_too_long', message: 'Message exceeds 4000 character limit' }); return; }
+        const cleanContent = content.replace(/\0/g, '').trim();
+        // Verify membership
+        const { data: member } = await supabase.from('room_members')
+          .select('id').eq('room_id', roomId).eq('user_id', user.userId).single();
+        if (!member) { socket.emit('error', { code: 'not_member' }); return; }
+        // Command routing
+        const parsed = parseCommand(cleanContent);
+        if (parsed) {
+          const { data: room } = await supabase.from('rooms').select('*').eq('id', roomId).single();
+          if (!room) { socket.emit('error', { code: 'room_not_found' }); return; }
+          const result = await executeCommand(parsed, { actor: user, room, socket, io });
+          if (result) io.to(roomId).emit('system:message', { roomId, content: result, type: 'command' });
+          return;
+        }
+        // Store message
+        const { data: msg } = await supabase.from('messages').insert({
+          room_id: roomId, sender_id: user.userId, content: cleanContent, is_command: false
+        }).select().single();
+        if (!msg) { socket.emit('error', { code: 'internal_error' }); return; }
+        // Broadcast to room
+        io.to(roomId).emit('message:new', {
+          id: msg.id, roomId, content: msg.content,
+          senderId: user.userId, senderUsername: user.username, senderRole: user.role,
+          createdAt: msg.created_at, isCommand: false, isSystem: false,
+        });
+        logger.info({ event: 'message.sent', userId: user.userId, roomId, latencyMs: Date.now() - start });
+      } catch (e: any) { socket.emit('error', { code: 'internal_error', message: e.message }); }
+    });
+    socket.on('message:delete', async ({ messageId }) => {
+      try {
+        await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
+        const { data: msg } = await supabase.from('messages').select('room_id').eq('id', messageId).single();
+        if (msg) io.to(msg.room_id).emit('message:deleted', { messageId, roomId: msg.room_id });
+      } catch (e: any) { socket.emit('error', { code: 'internal_error', message: e.message }); }
+    });
+    socket.on('typing:start', ({ roomId }) => {
+      socket.to(roomId).emit('typing:update', { roomId, userId: user.userId, isTyping: true });
+    });
+    socket.on('typing:stop', ({ roomId }) => {
+      socket.to(roomId).emit('typing:update', { roomId, userId: user.userId, isTyping: false });
+    });
+    socket.on('presence:heartbeat', async () => { await heartbeat(user.userId); });
+    socket.on('disconnect', async () => {
+      await setOffline(user.userId);
+      io.emit('presence:update', { userId: user.userId, isOnline: false });
+      logger.info({ event: 'socket.disconnected', userId: user.userId });
+    });
+  });
+  return io;
+}
+Section 29 — Routes (All Four Files)
+backend/src/routes/auth.routes.ts
+import { Router } from 'express';
+import { register, login, refresh, logout } from '../controllers/auth.controller';
+const r = Router();
+r.post('/register', register); r.post('/login', login);
+r.post('/refresh', refresh); r.post('/logout', logout);
+export default r;
+backend/src/routes/room.routes.ts
+import { Router } from 'express';
+import { authMiddleware } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/permission.middleware';
+import { createRoom, getRooms, joinRoom, getRoomMembers } from '../controllers/room.controller';
+const r = Router();
+r.use(authMiddleware);
+r.get('/', getRooms);
+r.post('/', requireRole('moderator'), createRoom);
+r.post('/:id/join', joinRoom);
+r.get('/:id/members', getRoomMembers);
+export default r;
+backend/src/routes/message.routes.ts
+import { Router } from 'express';
+import { authMiddleware } from '../middleware/auth.middleware';
+import { getMessages, deleteMessage } from '../controllers/message.controller';
+const r = Router();
+r.use(authMiddleware);
+r.get('/rooms/:id/messages', getMessages);
+r.delete('/messages/:id', deleteMessage);
+export default r;
+backend/src/routes/user.routes.ts
+import { Router } from 'express';
+import { authMiddleware } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/permission.middleware';
+import { getUsers, changeRole } from '../controllers/user.controller';
+import { getAuditLog } from '../services/audit.service';
+import { getAuditTrailFromChain } from '../blockchain/service';
+const r = Router();
+r.use(authMiddleware);
+r.get('/me', (req, res) => res.json({ user: req.user }));
+r.get('/', requireRole('moderator'), getUsers);
+r.patch('/:id/role', requireRole('superadmin'), changeRole);
+r.get('/search', async (req, res) => {
+  const { supabase } = await import('../config/supabase');
+  const q = req.query.q as string;
+  const { data } = await supabase.from('users').select('id, username, role, public_key').ilike('username', `%${q}%`).limit(10);
+  res.json({ users: data || [] });
+});
+r.get('/audit', requireRole('moderator'), async (req, res) => {
+  const events = await getAuditLog(req.query.roomId as string | undefined, 50);
+  res.json({ events });
+});
+r.get('/audit/chain', requireRole('superadmin'), async (_req, res) => {
+  const events = await getAuditTrailFromChain(20);
+  res.json({ events });
+});
+export default r;
+Section 30 — backend/src/index.ts (Entry Point)
+import 'dotenv/config';
+import './config/env';
+import express from 'express';
+import http from 'http';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import requestId from 'express-request-id';
+import { rateLimit } from 'express-rate-limit';
+import { env } from './config/env';
+import { logger } from './lib/logger';
+import { errorMiddleware } from './middleware/error.middleware';
+import { initSocket } from './socket';
+import authRoutes from './routes/auth.routes';
+import roomRoutes from './routes/room.routes';
+import messageRoutes from './routes/message.routes';
+import userRoutes from './routes/user.routes';
+const app = express();
+const server = http.createServer(app);
+app.set('trust proxy', 1);
+app.use(requestId());
+app.use(helmet({ crossOriginEmbedderPolicy: false }));
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || origin === env.FRONTEND_URL || /\.vercel\.app$/.test(origin)) cb(null, true);
+    else cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+}));
+app.use(cookieParser());
+app.use(express.json({ limit: '10kb' }));
+app.use(rateLimit({ windowMs: 60000, max: 100, standardHeaders: true, legacyHeaders: false }));
+app.get('/api/health', async (_, res) => {
+  const { redis } = await import('./redis/client');
+  const { supabase } = await import('./config/supabase');
+  const { contract } = await import('./blockchain/service');
+  const [redisOk, dbOk, chainOk] = await Promise.allSettled([
+    redis.ping().then(() => true),
+    supabase.from('users').select('id').limit(1).then(() => true),
+    (contract as any).getEventCount().then(() => true),
+  ]);
+  res.json({
+    status: 'ok',
+    redis: redisOk.status === 'fulfilled' ? 'ok' : 'error',
+    database: dbOk.status === 'fulfilled' ? 'ok' : 'error',
+    blockchain: chainOk.status === 'fulfilled' ? 'ok' : 'error',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+app.use('/api/auth', authRoutes);
+app.use('/api/rooms', roomRoutes);
+app.use('/api', messageRoutes);
+app.use('/api/users', userRoutes);
+app.use(errorMiddleware);
+const io = initSocket(server);
+const PORT = parseInt(env.PORT, 10);
+server.listen(PORT, () => logger.info({ event: 'server.started', port: PORT }));
+process.on('SIGTERM', () => {
+  logger.info({ event: 'server.shutdown.start' });
+  io.close(() => server.close(async () => {
+    const { redis } = await import('./redis/client');
+    await (redis as any).quit?.().catch(() => {});
+    logger.info({ event: 'server.shutdown.complete' });
+    process.exit(0);
+  }));
+});
+Section 31 — backend/src/seed.ts
+Run with: npx ts-node src/seed.ts — Creates superadmin + 3 default rooms.
+import 'dotenv/config';
+import './config/env';
+import bcrypt from 'bcrypt';
+import { supabase } from './config/supabase';
+import { env } from './config/env';
+async function seed() {
+  console.log('Seeding Axiom database...');
+  // Create superadmin
+  const hash = await bcrypt.hash(env.SUPERADMIN_PASSWORD, 12);
+  const { data: existing } = await supabase.from('users').select('id').eq('email', env.SUPERADMIN_EMAIL).single();
+  let adminId: string;
+  if (existing) {
+    adminId = existing.id;
+    console.log('Superadmin already exists:', adminId);
+  } else {
+    const { data: admin, error } = await supabase.from('users').insert({
+      username: env.SUPERADMIN_USERNAME, email: env.SUPERADMIN_EMAIL,
+      password_hash: hash, role: 'superadmin',
+    }).select().single();
+    if (error || !admin) { console.error('Failed to create superadmin:', error); process.exit(1); }
+    adminId = admin.id;
+    console.log('Created superadmin:', adminId);
+  }
+  // Create default rooms
+  const defaultRooms = ['general', 'engineering', 'announcements'];
+  for (const name of defaultRooms) {
+    const { data: exists } = await supabase.from('rooms').select('id').eq('name', name).single();
+    if (exists) { console.log(`Room #${name} already exists`); continue; }
+    const { data: room } = await supabase.from('rooms').insert({
+      name, description: `#${name} channel`, created_by: adminId
+    }).select().single();
+    if (room) {
+      await supabase.from('room_members').insert({ room_id: room.id, user_id: adminId, local_role: 'owner' });
+      console.log(`Created room #${name}:`, room.id);
+    }
+  }
+  console.log('Seed complete.');
+  process.exit(0);
+}
+seed().catch(e => { console.error(e); process.exit(1); });
+Section 32 — backend/package.json
+{
+  "name": "axiom-backend", "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "seed": "ts-node src/seed.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "@upstash/redis": "^1.28.0",
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "ethers": "^6.10.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-request-id": "^1.4.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "opossum": "^8.1.3",
+    "pino": "^8.17.2",
+    "pino-pretty": "^10.3.1",
+    "socket.io": "^4.6.2",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2", "@types/cookie-parser": "^1.4.6",
+    "@types/cors": "^2.8.17", "@types/express": "^4.17.21",
+    "@types/express-request-id": "^1.4.3",
+    "@types/jsonwebtoken": "^9.0.5", "@types/node": "^20.11.0",
+    "ts-node-dev": "^2.0.0", "typescript": "^5.3.3"
+  }
+}
+backend/tsconfig.json
+{ "compilerOptions": {
+    "target": "ES2020", "module": "commonjs", "lib": ["ES2020"],
+    "outDir": "./dist", "rootDir": "./src",
+    "strict": true, "esModuleInterop": true,
+    "skipLibCheck": true, "resolveJsonModule": true
+  }, "include": ["src/**/*"], "exclude": ["node_modules","dist"] }
+End of Part 2
+Part 2 covers the complete backend: TypeScript types, env validation, Supabase/Redis clients, logger, error classes, crypto utils, presence service, dual-write audit service, blockchain service with circuit breaker, all controllers, all socket event handlers, all routes, the seed script, and package.json.
+After implementing Part 2: run npm install, npm run build, verify zero TypeScript errors, run npm run seed, test GET /api/health returns redis:ok + database:ok + blockchain:ok.

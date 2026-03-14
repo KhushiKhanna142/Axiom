@@ -1,0 +1,611 @@
+AXIOM
+Internal Communications Platform
+Complete Build Specification — Part 1 of 4
+Project Identity · Architecture · Database · Role System · Blockchain Design
+Repository: https://github.com/anushkamali-2005/Axiom.git
+ANTIGRAVITY INSTRUCTION: This is Part 1 of 4. Read all four parts completely before writing a single line of code. Every design decision is made here. You implement exactly what is written — no assumptions, no creative choices, no substitutions.
+Section 0 — Project Identity and Mission
+Project Name: Axiom
+Repository: https://github.com/anushkamali-2005/Axiom.git
+Type: Production-grade internal messaging platform for distributed engineering organizations.
+Frontend deployment: Vercel. Backend deployment: Render.
+Axiom solves a precise, real problem: organizations need private, hierarchical, real-time internal communication that they fully own and control. Unlike public tools, Axiom enforces a strict power structure — not every user holds equal authority. The platform must be:
+Instant — messages delivered under 100ms to all connected clients in the same room
+Hierarchical — three global roles (superadmin, moderator, member) plus room-local roles, enforced server-side on every action
+Extensible — slash commands execute real server-side actions, not cosmetic responses
+Auditable — every administrative action is written to both Postgres and the Polygon Amoy blockchain, making the audit trail tamper-proof and publicly verifiable
+Cryptographically secure — passwords hashed bcrypt rounds 12, JWT signed HMAC-SHA256, direct messages end-to-end encrypted with NaCl box
+DO NOT IMPROVISE ARCHITECTURE. Follow this specification exactly. Every file path, every column name, every event name is specified. Deviation causes integration failures.
+Section 1 — Problem Statement (Verbatim)
+System Memo — Internal Communications Platform
+"Organizations rarely trust external communication platforms with sensitive internal conversations. Instead they build their own. Inside these systems, messages travel instantly between rooms, teams, and individuals. But unlike public chat applications, not everyone holds equal power.
+Someone must hold ultimate authority over the system. Certain users may create or manage discussion rooms. Others may only participate. Messages must travel instantly between connected clients. The platform occasionally performs actions when commands appear."
+What Must Be True At Demo Time
+Role hierarchy is enforced server-side on every action — not just on the UI
+Messages are delivered in real-time to all connected clients in a room — under 100ms on local network
+The system supports multiple rooms with independent membership
+Slash commands trigger real server-side actions, not cosmetic system messages
+Every role change, kick, ban, and room creation is permanently recorded on Polygon Amoy testnet — judges can open amoy.polygonscan.com and verify the transaction
+Direct messages between users are end-to-end encrypted — server stores only ciphertext
+The platform remains stable as users join and leave across sessions
+Section 2 — Why Blockchain is Load-Bearing
+The audit log is written to Polygon Amoy testnet. This is architectural, not decorative. Here is exactly why:
+The Problem With Postgres-Only Audit Logs
+If admin action records live only in Postgres, any database administrator can silently delete them with DELETE FROM audit_log. There is no cryptographic proof an event occurred. The log is mutable. For a platform claiming tamper-proof accountability, this is architecturally dishonest.
+What Polygon Amoy Provides
+Immutability — once confirmed, no one can delete or alter the record, including the contract deployer
+Public verifiability — any person with a tx hash can open amoy.polygonscan.com and read the event
+Independent timestamp — block.timestamp is set by the network, not by your server clock
+Demo moment — judges can verify on-chain events live during the presentation
+Exactly Which Events Go On-Chain
+On-chain (admin actions — low frequency, high accountability):
+ROLE_CHANGE — when a user's global role is changed
+KICK — when a user is removed from a room
+BAN — when a user is banned from the platform
+ROOM_ARCHIVED — when a room is archived
+ROOM_CREATED — when a moderator or superadmin creates a room
+Off-chain only — too frequent, gas cost is unreasonable:
+message:sent — thousands per hour
+room:joined — routine, non-destructive
+room:left — routine, non-destructive
+The blockchain is NOT used for storing messages. NOT used as a database. NOT used for payments. It is used exclusively for making admin actions permanently verifiable. Never write a message send event to the blockchain.
+Contract Already Deployed — Do Not Redeploy
+Contract Address: 0xd9145CCE52D386f254917e481eB44e9943F39138
+Network: Polygon Amoy testnet (chain ID 80002)
+RPC URL: https://rpc-amoy.polygon.technology
+Private Key (testnet only — always in .env, always in .gitignore):
+POLYGON_PRIVATE_KEY=a13aff9896bb49129f76e930d46c7da9468719b5ece7ff4f490dd51f707b6bbd
+DO NOT REDEPLOY THE CONTRACT. Use the address above directly in ethers.js. The private key is a testnet key — zero real value — but it must never be committed to git.
+Section 3 — Why Cryptography is Load-Bearing
+1. Password Hashing — bcrypt rounds 12
+The server never stores plaintext passwords. Every password hashed with bcrypt at cost factor 12. On login, bcrypt.compare() verifies without reversing. If the database leaks, passwords are not exposed.
+2. JWT Signature — HMAC-SHA256
+JWT access tokens carry userId, username, and role in the payload, signed with a 32-character server secret. If a user modifies their role claim, the signature becomes invalid. Auth middleware verifies the signature on every request before it reaches any route handler. Role is NEVER read from the request body — only from the decoded, verified JWT.
+3. End-to-End Encrypted Direct Messages — NaCl Box
+DMs between two users use nacl.box (X25519-XSalsa20-Poly1305). Each user has a keypair. The public key is stored in the DB. The private key is encrypted with a key derived from the user's password via scrypt and stored encrypted in the DB.
+Sender encrypts message client-side: nacl.box(message, nonce, recipientPublicKey, senderSecretKey)
+Server receives only ciphertext + nonce — never the plaintext
+Recipient decrypts client-side: nacl.box.open(ciphertext, nonce, senderPublicKey, mySecretKey)
+Room messages are NOT E2EE — they are stored as plaintext for history. Only DMs are E2EE.
+Section 4 — Complete Technology Stack
+Frontend
+Technology
+Version
+Purpose
+Next.js
+14 App Router
+React framework, SSR, routing, Vercel deploy
+TypeScript
+strict mode
+Type safety across all frontend code
+Tailwind CSS
+3.x
+Utility-first styling. Dark mode first. Geist font.
+Socket.io-client
+4.x
+Real-time WebSocket — messages, presence, commands
+Zustand
+4.x
+Auth store, chat store (active room, drafts)
+TanStack Query
+v5
+Server state — room list, message history
+TweetNaCl
+1.x
+E2EE keypair operations client-side
+tweetnacl-util
+0.15.x
+Base64 encode/decode for NaCl
+Axios
+1.x
+HTTP client with JWT injection + error normalisation
+react-window
+1.x
+Virtualised message list — never render all messages
+Zod
+3.x
+Request validation schemas (shared with backend)
+Backend
+Technology
+Version
+Purpose
+Node.js
+20 LTS
+Runtime — deploy to Render
+Express.js
+4.x
+HTTP server and REST API
+TypeScript
+strict mode
+Type safety — no use of any type
+Supabase
+@supabase/supabase-js
+PostgreSQL. Use SERVICE_ROLE_KEY server-side.
+Upstash Redis
+@upstash/redis
+Presence TTL, rate limiting, socket-user mapping
+Socket.io
+4.x
+Real-time WebSocket server. Namespace: /chat
+jsonwebtoken
+9.x
+Access token 15min + refresh token 7d
+bcrypt
+5.x
+Password hashing. Cost factor 12.
+TweetNaCl
+1.x
+Keypair generation, DM key encryption
+ethers.js
+v6
+Polygon Amoy blockchain interaction
+Zod
+3.x
+All request body validation
+Pino
+8.x
+Structured JSON logging. Every log has event, userId, roomId, role, latencyMs.
+Helmet
+7.x
+HTTP security headers
+express-rate-limit
+7.x
+60 msg/min per user, 100 req/min per IP, 10 cmd/min per user
+opossum
+8.x
+Circuit breaker wrapping all blockchain calls
+cookie-parser
+1.x
+httpOnly cookie handling for refresh tokens
+express-request-id
+1.x
+Unique request ID on every request for tracing
+Section 5 — Monorepo Structure
+Root
+Axiom/
+├── frontend/          <- Next.js 14 (Vercel)
+├── backend/           <- Express + Socket.io (Render)
+├── contracts/         <- AuditLog.sol reference copy
+├── docker-compose.yml
+├── .env.example
+├── .gitignore         <- Must include .env, node_modules, dist
+└── README.md
+Backend Source — backend/src/
+backend/src/
+├── index.ts                      <- Express + Socket.io entry point
+├── config/
+│   ├── env.ts                    <- Zod env validation, exits on failure
+│   └── supabase.ts               <- Supabase client (SERVICE_ROLE_KEY)
+├── redis/
+│   └── client.ts                 <- Upstash Redis singleton
+├── blockchain/
+│   ├── service.ts                <- ethers.js + opossum circuit breaker
+│   └── abi.ts                    <- AuditLog ABI as TypeScript const
+├── crypto/
+│   ├── e2ee.ts                   <- NaCl keypair gen + private key encryption
+│   └── tokens.ts                 <- JWT sign + verify
+├── commands/
+│   ├── parser.ts                 <- Detect / prefix, extract cmd + args
+│   ├── registry.ts               <- Map command names to handlers
+│   └── handlers/
+│       ├── kick.handler.ts
+│       ├── promote.handler.ts
+│       ├── demote.handler.ts
+│       ├── ban.handler.ts
+│       ├── create-room.handler.ts
+│       ├── archive-room.handler.ts
+│       ├── online.handler.ts
+│       ├── history.handler.ts
+│       ├── audit.handler.ts
+│       └── help.handler.ts
+├── routes/
+│   ├── auth.routes.ts
+│   ├── room.routes.ts
+│   ├── message.routes.ts
+│   └── user.routes.ts
+├── controllers/
+│   ├── auth.controller.ts
+│   ├── room.controller.ts
+│   ├── message.controller.ts
+│   └── user.controller.ts
+├── middleware/
+│   ├── auth.middleware.ts        <- JWT verification, sets req.user
+│   ├── permission.middleware.ts  <- requireRole() factory
+│   ├── ratelimit.middleware.ts   <- Per-user + per-IP limiters
+│   └── error.middleware.ts       <- Central error handler
+├── socket/
+│   ├── index.ts                  <- Server setup + auth middleware
+│   └── handlers/
+│       ├── message.handler.ts
+│       ├── room.handler.ts
+│       └── presence.handler.ts
+├── services/
+│   ├── room.service.ts
+│   ├── message.service.ts
+│   ├── presence.service.ts       <- Redis TTL presence
+│   └── audit.service.ts          <- DB + blockchain dual-write
+├── lib/
+│   ├── logger.ts                 <- Pino structured logger
+│   └── errors.ts                 <- AppError class
+└── seed.ts                       <- Creates superadmin + default rooms
+Frontend Source — frontend/
+frontend/
+├── app/
+│   ├── layout.tsx                <- Root layout, Providers, Geist font
+│   ├── page.tsx                  <- Redirect to /chat or /login
+│   ├── globals.css               <- CSS variables + Tailwind base
+│   ├── providers.tsx             <- QueryClientProvider wrapper
+│   ├── (auth)/
+│   │   ├── login/page.tsx
+│   │   └── register/page.tsx
+│   └── chat/
+│       ├── layout.tsx            <- Sidebar + main area shell
+│       ├── page.tsx              <- Default redirect to #general
+│       └── [roomId]/page.tsx     <- Active room view
+├── components/
+│   ├── ui/
+│   │   ├── Button.tsx
+│   │   ├── Input.tsx
+│   │   ├── Modal.tsx
+│   │   ├── Badge.tsx             <- OWNER (red), MOD (amber), no badge for member
+│   │   ├── Avatar.tsx            <- Initials-based, colour from username hash
+│   │   └── Toast.tsx
+│   ├── chat/
+│   │   ├── MessageList.tsx       <- Virtualised feed via react-window
+│   │   ├── MessageItem.tsx       <- Single message + role badge
+│   │   ├── MessageInput.tsx      <- Normal + command mode with autocomplete
+│   │   ├── SystemMessage.tsx     <- Command output + join/leave events
+│   │   └── TypingIndicator.tsx
+│   ├── sidebar/
+│   │   ├── Sidebar.tsx
+│   │   ├── RoomList.tsx
+│   │   ├── RoomItem.tsx
+│   │   ├── UserList.tsx          <- Online members panel
+│   │   └── OnlineDot.tsx         <- Green / grey presence
+│   ├── admin/
+│   │   ├── AdminPanel.tsx        <- Ctrl+Shift+A, superadmin only
+│   │   ├── AuditLog.tsx          <- Last 50 events + Polygonscan tx links
+│   │   └── UserManager.tsx       <- Role assignment controls
+│   └── dm/
+│       ├── DMPane.tsx
+│       └── DMBubble.tsx          <- Shows E2EE lock icon
+├── hooks/
+│   ├── useSocket.ts
+│   ├── useMessages.ts
+│   ├── usePresence.ts
+│   ├── useRoom.ts
+│   └── useCommand.ts
+├── lib/
+│   ├── axios.ts
+│   ├── socket.ts
+│   ├── e2ee.ts
+│   └── queryClient.ts
+├── store/
+│   ├── auth.store.ts
+│   └── chat.store.ts
+└── types/index.ts
+Section 6 — Complete Database Schema
+Run every SQL statement in Supabase SQL editor in order. Do not modify column names — the backend references them directly.
+Step 1: Users Table
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member'
+    CHECK (role IN ('superadmin', 'moderator', 'member')),
+  public_key TEXT,
+  encrypted_private_key TEXT,
+  key_salt TEXT,
+  is_online BOOLEAN DEFAULT false,
+  last_seen TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  refresh_token TEXT
+);
+The superadmin is seeded on first boot from env vars. There is exactly one superadmin. Superadmin role cannot be assigned through the API — only through the seed script. The public_key, encrypted_private_key, and key_salt columns support E2EE direct messages.
+Step 2: Rooms Table
+CREATE TABLE rooms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT UNIQUE NOT NULL
+    CHECK (name ~ '^[a-z][a-z0-9-]{2,29}$'),
+  description TEXT,
+  is_private BOOLEAN DEFAULT false,
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  is_archived BOOLEAN DEFAULT false
+);
+Step 3: Room Members Table (Two-Tier Roles)
+CREATE TABLE room_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  local_role TEXT DEFAULT 'member'
+    CHECK (local_role IN ('owner', 'moderator', 'member')),
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(room_id, user_id)
+);
+local_role is room-scoped. A global member can be the owner of their own room. Global role always takes precedence over local role when they conflict. Both tiers must be checked on every room action.
+Step 4: Messages Table
+CREATE TABLE messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+  sender_id UUID REFERENCES users(id),
+  content TEXT NOT NULL,
+  is_command BOOLEAN DEFAULT false,
+  is_system BOOLEAN DEFAULT false,
+  edited_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+Soft-delete only — set deleted_at, never hard delete. Client renders "[deleted]" for messages where deleted_at is not null.
+Step 5: Direct Messages Table (E2EE — Ciphertext Only)
+CREATE TABLE direct_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sender_id UUID REFERENCES users(id),
+  recipient_id UUID REFERENCES users(id),
+  ciphertext TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+Step 6: Audit Log Table
+CREATE TABLE audit_log (
+  id BIGSERIAL PRIMARY KEY,
+  event TEXT NOT NULL,
+  actor_id UUID REFERENCES users(id),
+  target_id UUID,
+  room_id UUID,
+  metadata JSONB,
+  tx_hash TEXT,
+  on_chain BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+The audit_log table is APPEND-ONLY. There must be no DELETE or UPDATE routes for it. tx_hash is populated asynchronously after the blockchain write confirms.
+Step 7: Indexes
+CREATE INDEX idx_messages_room ON messages(room_id, created_at DESC);
+CREATE INDEX idx_messages_sender ON messages(sender_id);
+CREATE INDEX idx_room_members_user ON room_members(user_id);
+CREATE INDEX idx_room_members_room ON room_members(room_id);
+CREATE INDEX idx_audit_actor ON audit_log(actor_id);
+CREATE INDEX idx_audit_room ON audit_log(room_id);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_direct_messages_pair ON direct_messages(sender_id, recipient_id);
+Section 7 — Role and Permission System
+Axiom has a two-tier permission model: global roles and room-local roles. Both must be checked on every protected action.
+7.1 Global Role Hierarchy
+Global Role
+Create Rooms
+Promote Users
+Kick (Global)
+Delete Rooms
+Ban Users
+superadmin
+Yes
+Yes (any role)
+Yes (anyone)
+Yes
+Yes
+moderator
+Yes
+No
+Yes (members)
+Own rooms only
+No
+member
+No
+No
+No
+No
+No
+7.2 Room-Local Role Hierarchy
+Local Role
+Assigned To
+Can Invite
+Can Kick
+Can Edit Room
+owner
+Room creator or promoted by superadmin
+Yes
+Yes (non-owners)
+Yes
+moderator
+Assigned by room owner or global moderator
+Yes
+Yes (members only)
+No
+member
+Default on join
+No
+No
+No
+7.3 Permission Middleware Code
+File: backend/src/middleware/permission.middleware.ts
+export const ROLE_WEIGHT = { member: 0, moderator: 1, superadmin: 2 };
+export function requireRole(minGlobalRole: GlobalRole) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'unauthorized', message: 'Authentication required' });
+    if (ROLE_WEIGHT[user.role] < ROLE_WEIGHT[minGlobalRole]) {
+      return res.status(403).json({ error: 'forbidden', message: 'Insufficient role' });
+    }
+    next();
+  };
+}
+Role is ALWAYS read from the verified JWT (req.user.role) — never from the request body or query string. Client-side role checks are decorative only. The server re-checks on every single request and socket event.
+Section 8 — Command Engine
+Commands are messages beginning with /. They are intercepted server-side, never executed on the client. The client sends them as normal message strings — the server detects the prefix and routes to the command processor instead of broadcasting.
+8.1 Supported Commands
+Command
+Required Role
+Action
+On-Chain?
+/help
+member
+Lists available commands in a system message to sender
+No
+/kick @user
+moderator (room)
+Removes user from room, emits room:kicked to target
+Yes — KICK event
+/promote @user [role]
+superadmin
+Changes global role, emits role:changed to all
+Yes — ROLE_CHANGE
+/demote @user
+superadmin
+Demotes to member, emits role:changed to all
+Yes — ROLE_CHANGE
+/create-room #name
+moderator
+Creates new room, creator becomes owner
+Yes — ROOM_CREATED
+/archive-room
+room owner
+Archives current room
+Yes — ROOM_ARCHIVED
+/ban @user
+superadmin
+Bans user from platform entirely
+Yes — BAN
+/online
+member
+Lists online members of current room
+No
+/history [n]
+member
+Fetches last n messages (max 100)
+No
+/audit
+superadmin
+Shows last 10 audit events with tx hashes
+No
+8.2 Command Parser
+File: backend/src/commands/parser.ts
+export interface ParsedCommand { command: string; args: string[]; }
+export function parseCommand(content: string): ParsedCommand | null {
+  if (!content.startsWith('/')) return null;
+  const [rawCmd, ...args] = content.slice(1).split(' ');
+  return { command: rawCmd.toLowerCase(), args };
+}
+8.3 Command Registry
+File: backend/src/commands/registry.ts
+import { kickHandler } from './handlers/kick.handler';
+import { promoteHandler } from './handlers/promote.handler';
+import { demoteHandler } from './handlers/demote.handler';
+import { banHandler } from './handlers/ban.handler';
+import { createRoomHandler } from './handlers/create-room.handler';
+import { archiveRoomHandler } from './handlers/archive-room.handler';
+import { onlineHandler } from './handlers/online.handler';
+import { historyHandler } from './handlers/history.handler';
+import { auditHandler } from './handlers/audit.handler';
+import { helpHandler } from './handlers/help.handler';
+export const COMMANDS: Record<string, CommandHandler> = {
+  kick: kickHandler,
+  promote: promoteHandler,
+  demote: demoteHandler,
+  ban: banHandler,
+  'create-room': createRoomHandler,
+  'archive-room': archiveRoomHandler,
+  online: onlineHandler,
+  history: historyHandler,
+  audit: auditHandler,
+  help: helpHandler,
+};
+export async function executeCommand(parsed: ParsedCommand, ctx: CommandContext) {
+  const handler = COMMANDS[parsed.command];
+  if (!handler) return systemMessage('Unknown command. Type /help for a list.');
+  return handler(parsed.args, ctx);
+}
+CommandContext carries: { actor: JwtPayload, room: Room, socket: Socket, io: Server, db: SupabaseClient }. Handlers check permissions internally and throw AppError if the actor lacks the required role.
+Section 9 — Environment Variables
+backend/.env
+# Server
+PORT=4000
+NODE_ENV=development
+FRONTEND_URL=http://localhost:3000
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# Upstash Redis
+UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-token
+# JWT
+JWT_ACCESS_SECRET=minimum-32-character-random-string
+JWT_REFRESH_SECRET=different-minimum-32-character-string
+JWT_ACCESS_EXPIRY=15m
+JWT_REFRESH_EXPIRY=7d
+# Polygon Amoy Blockchain
+POLYGON_RPC_URL=https://rpc-amoy.polygon.technology
+POLYGON_CHAIN_ID=80002
+POLYGON_PRIVATE_KEY=a13aff9896bb49129f76e930d46c7da9468719b5ece7ff4f490dd51f707b6bbd
+POLYGON_CONTRACT_ADDRESS=0xd9145CCE52D386f254917e481eB44e9943F39138
+# Seed
+SUPERADMIN_EMAIL=admin@axiom.dev
+SUPERADMIN_PASSWORD=minimum-12-char-password
+SUPERADMIN_USERNAME=superadmin
+frontend/.env.local
+NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_SOCKET_URL=http://localhost:4000
+Never commit .env or .env.local. Both must be in .gitignore. The POLYGON_PRIVATE_KEY is a testnet-only key with no real value, but treat it as sensitive — always in .env, never in source code.
+Section 10 — AuditLog Smart Contract
+Already deployed at: 0xd9145CCE52D386f254917e481eB44e9943F39138 on Polygon Amoy. Keep a reference copy at contracts/AuditLog.sol.
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+contract AuditLog {
+    struct AuditEvent {
+        string eventType;
+        address actor;
+        bytes32 actorId;
+        bytes32 targetId;
+        bytes32 dataHash;
+        uint256 timestamp;
+    }
+    AuditEvent[] public events;
+    address public owner;
+    event AuditEventLogged(uint256 indexed index, string eventType,
+        address indexed actor, bytes32 actorId, bytes32 targetId,
+        bytes32 dataHash, uint256 timestamp);
+    modifier onlyOwner() { require(msg.sender == owner, "Not authorized"); _; }
+    constructor() { owner = msg.sender; }
+    function logEvent(string calldata eventType, bytes32 actorId,
+        bytes32 targetId, bytes32 dataHash) external onlyOwner {
+        AuditEvent memory e = AuditEvent(eventType, msg.sender,
+            actorId, targetId, dataHash, block.timestamp);
+        events.push(e);
+        emit AuditEventLogged(events.length-1, eventType,
+            msg.sender, actorId, targetId, dataHash, block.timestamp);
+    }
+    function getEvent(uint256 i) external view returns (AuditEvent memory) {
+        require(i < events.length, "Index out of bounds");
+        return events[i];
+    }
+    function getEventCount() external view returns (uint256) {
+        return events.length;
+    }
+}
+ABI — File: backend/src/blockchain/abi.ts
+export const AUDIT_LOG_ABI = [
+  { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
+  { "inputs": [{"internalType":"uint256","name":"i","type":"uint256"}],
+    "name": "getEvent", "outputs": [{"components": [
+      {"internalType":"string","name":"eventType","type":"string"},
+      {"internalType":"address","name":"actor","type":"address"},
+      {"internalType":"bytes32","name":"actorId","type":"bytes32"},
+      {"internalType":"bytes32","name":"targetId","type":"bytes32"},
+      {"internalType":"bytes32","name":"dataHash","type":"bytes32"},
+      {"internalType":"uint256","name":"timestamp","type":"uint256"}
+    ],"internalType":"struct AuditLog.AuditEvent","name":"","type":"tuple"}],
+    "stateMutability": "view", "type": "function" },
+  { "inputs": [], "name": "getEventCount",
+    "outputs": [{"internalType":"uint256","name":"","type":"uint256"}],
+    "stateMutability": "view", "type": "function" },
+  { "inputs": [{"internalType":"string","name":"eventType","type":"string"},
+      {"internalType":"bytes32","name":"actorId","type":"bytes32"},
+      {"internalType":"bytes32","name":"targetId","type":"bytes32"},
+      {"internalType":"bytes32","name":"dataHash","type":"bytes32"}],
+    "name": "logEvent", "outputs": [], "stateMutability": "nonpayable", "type": "function" }
+] as const;
+End of Part 1
+Part 1 covers: project identity, problem statement, blockchain rationale, crypto rationale, full tech stack, complete monorepo structure, every database table and index, role system with two-tier permissions, command engine, environment variables, and the deployed smart contract with ABI.
+Continue to Part 2: TypeScript types, complete backend implementation — every controller, middleware, service, socket handler, and blockchain service with copy-paste code. Then Part 3: complete frontend. Then Part 4: deployment, demo script, judge Q&A.
