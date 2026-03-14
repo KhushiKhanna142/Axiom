@@ -2,26 +2,26 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import api from '../../../lib/axios';
 import { useAuthStore } from '../../../store/auth.store';
+import api from '../../../lib/axios';
 
-export default function LoginPage() {
+export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { setAuth, setKeyData } = useAuthStore();
   const router = useRouter();
+  const { setAuth } = useAuthStore();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+
     try {
       const { data } = await api.post('/auth/login', { email, password });
       setAuth(data.user, data.accessToken);
-      if (data.encryptedPrivateKey) setKeyData(data.encryptedPrivateKey, data.keySalt);
-      router.push('/chat');
+      router.replace('/chat');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {
@@ -30,30 +30,40 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)' }}>
-      <div style={{ width: 360, padding: 32, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-sidebar)' }}>
-        <h1 style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Axiom</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 28 }}>Sign in to your workspace</p>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24, position: 'relative' }}>
+      {/* Background glow */}
+      <div style={{ position: 'absolute', width: '60vw', height: '60vw', background: 'radial-gradient(circle, rgba(var(--primary), 0.15) 0%, transparent 70%)', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', zIndex: -1 }}></div>
+      
+      <div className="glass-panel" style={{ width: '100%', maxWidth: 440, padding: 40 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
+          <div style={{ background: 'linear-gradient(135deg, hsl(var(--secondary)), hsl(var(--primary)))', padding: 16, borderRadius: 16, marginBottom: 16, boxShadow: '0 8px 32px rgba(var(--primary), 0.3)', width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 32 }}>⚡</span>
+          </div>
+          <h1 className="text-gradient" style={{ margin: 0, fontSize: 40, fontWeight: 700 }}>Axiom</h1>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 8, textAlign: 'center' }}>Welcome back! Enter your details.</p>
+        </div>
+
+        {error && <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: 12, borderRadius: 8, marginBottom: 24, textAlign: 'center', fontSize: 14 }}>{error}</div>}
+
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} />
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="glass-input" placeholder="you@axiom.dev" />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} />
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="glass-input" placeholder="••••••••••" />
           </div>
-          {error && <p style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</p>}
-          <button type="submit" disabled={loading}
-            style={{ padding: '10px', borderRadius: 8, background: 'var(--accent)', color: '#fff', fontWeight: 500, border: 'none', cursor: 'pointer', opacity: loading ? 0.7 : 1 }}>
-            {loading ? 'Signing in...' : 'Sign in'}
+          <button type="submit" className="btn-primary" style={{ width: '100%', padding: 14, marginTop: 16 }} disabled={loading}>
+            {loading ? 'Processing...' : 'Sign In'}
           </button>
         </form>
-        <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>
-          No account? <Link href="/register" style={{ color: 'var(--accent)' }}>Register</Link>
-        </p>
+
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
+          <Link href="/register" style={{ color: 'var(--text-secondary)', fontSize: 14, textDecoration: 'underline' }}>
+            Don't have an account? Sign up
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -1,10 +1,10 @@
 export default function SystemMessage({ content }: { content: string }) {
   return (
     <div style={{
-      padding: '6px 24px', background: 'var(--system-msg)', margin: '4px 16px',
-      borderRadius: 6, borderLeft: '3px solid var(--accent)',
+      padding: '8px 24px', background: 'rgba(255,255,255,0.03)', margin: '4px 20px',
+      borderRadius: 8, borderLeft: '3px solid hsl(var(--primary))', display: 'flex', alignItems: 'center'
     }}>
-      <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic' }}>{'> '}{content}</span>
+      <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontStyle: 'italic' }}>{ content}</span>
     </div>
   );
 }

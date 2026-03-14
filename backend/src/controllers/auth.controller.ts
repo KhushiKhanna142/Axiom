@@ -46,6 +46,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       public_key: kp.publicKey, encrypted_private_key: encrypted, key_salt: salt,
     }).select().single();
     if (error || !user) {
+      console.error('Supabase registration error:', error);
       res.status(500).json({ error: 'internal_error', message: 'Registration failed' });
       return;
     }
@@ -59,7 +60,9 @@ export async function register(req: Request, res: Response): Promise<void> {
     });
     logger.info({ event: 'auth.register', userId: user.id });
   } catch (e) {
-    res.status(500).json({ error: 'internal_error', message: 'Registration failed' });
+    console.error('Registration Catch Error:', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: 'internal_error', message: msg });
   }
 }
 

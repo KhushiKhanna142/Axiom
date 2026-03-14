@@ -2,13 +2,15 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import api from '../../../lib/axios';
 import { useAuthStore } from '../../../store/auth.store';
-
+import api from '../../../lib/axios';
 export default function RegisterPage() {
-  const [form, setForm] = useState({ username: '', email: '', password: '' });
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  
   const { setAuth } = useAuthStore();
   const router = useRouter();
 
@@ -16,10 +18,18 @@ export default function RegisterPage() {
     e.preventDefault();
     setLoading(true);
     setError('');
+
     try {
-      const { data } = await api.post('/auth/register', form);
+      // 1. Register
+      await api.post('/auth/register', { 
+        username, email, password
+      });
+
+      // 2. Auto-login
+      const { data } = await api.post('/auth/login', { email, password });
       setAuth(data.user, data.accessToken);
-      router.push('/chat');
+      router.replace('/chat');
+      
     } catch (err: any) {
       setError(err.response?.data?.message || 'Registration failed');
     } finally {
@@ -28,28 +38,44 @@ export default function RegisterPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)' }}>
-      <div style={{ width: 360, padding: 32, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-sidebar)' }}>
-        <h1 style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Create account</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 28 }}>Join your organisation on Axiom</p>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24, position: 'relative' }}>
+      {/* Background glow */}
+      <div style={{ position: 'absolute', width: '60vw', height: '60vw', background: 'radial-gradient(circle, rgba(var(--primary), 0.15) 0%, transparent 70%)', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', zIndex: -1 }}></div>
+      
+      <div className="glass-panel" style={{ width: '100%', maxWidth: 440, padding: 40 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
+          <div style={{ background: 'linear-gradient(135deg, hsl(var(--secondary)), hsl(var(--primary)))', padding: 16, borderRadius: 16, marginBottom: 16, boxShadow: '0 8px 32px rgba(var(--primary), 0.3)', width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 32 }}>⚡</span>
+          </div>
+          <h1 className="text-gradient" style={{ margin: 0, fontSize: 40, fontWeight: 700 }}>Axiom</h1>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 8, textAlign: 'center' }}>Create your account to start chatting.</p>
+        </div>
+
+        {error && <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: 12, borderRadius: 8, marginBottom: 24, textAlign: 'center', fontSize: 14 }}>{error}</div>}
+
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {[['Username', 'text', 'username'], ['Email', 'email', 'email'], ['Password', 'password', 'password']].map(([label, type, field]) => (
-            <div key={field}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>{label}</label>
-              <input type={type} value={form[field as keyof typeof form]}
-                onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))} required
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 14, outline: 'none' }} />
-            </div>
-          ))}
-          {error && <p style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</p>}
-          <button type="submit" disabled={loading}
-            style={{ padding: 10, borderRadius: 8, background: 'var(--accent)', color: '#fff', fontWeight: 500, border: 'none', cursor: 'pointer' }}>
-            {loading ? 'Creating...' : 'Create account'}
+          <div>
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Username</label>
+            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required className="glass-input" placeholder="coolhacker99" />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="glass-input" placeholder="you@axiom.dev" />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required className="glass-input" placeholder="••••••••" />
+          </div>
+          <button type="submit" className="btn-primary" style={{ width: '100%', padding: 14, marginTop: 16 }} disabled={loading}>
+            {loading ? 'Creating...' : 'Create Account'}
           </button>
         </form>
-        <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>
-          Have an account? <Link href="/login" style={{ color: 'var(--accent)' }}>Sign in</Link>
-        </p>
+
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
+          <Link href="/login" style={{ color: 'var(--text-secondary)', fontSize: 14, textDecoration: 'underline' }}>
+            Already have an account? Log in
+          </Link>
+        </div>
       </div>
     </div>
   );

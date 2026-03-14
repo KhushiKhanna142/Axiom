@@ -1,4 +1,3 @@
-'use client';
 import { useState, useRef } from 'react';
 import { getSocket } from '../../lib/socket';
 import { useAuthStore } from '../../store/auth.store';
@@ -44,26 +43,29 @@ export default function MessageInput({ roomId }: { roomId: string }) {
   };
 
   return (
-    <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0, position: 'relative' }}>
+    <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)', background: 'rgba(10, 10, 15, 0.8)', flexShrink: 0, position: 'relative', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
       {suggestions.length > 0 && (
         <div style={{
-          position: 'absolute', bottom: '100%', left: 16, right: 16, marginBottom: 4,
-          background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8,
-          padding: 4, maxHeight: 180, overflowY: 'auto',
+          position: 'absolute', bottom: '100%', left: 24, right: 24, marginBottom: 8,
+          background: 'rgba(30, 30, 45, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12,
+          padding: 8, maxHeight: 180, overflowY: 'auto', backdropFilter: 'blur(16px)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
         }}>
           {suggestions.map((cmd) => (
             <button key={cmd}
               onClick={() => { setContent(cmd + ' '); setSuggestions([]); }}
               style={{
-                display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 13,
-                color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', borderRadius: 4,
-              }}>
+                display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 14, fontWeight: 500,
+                color: 'hsl(var(--secondary))', background: 'none', border: 'none', cursor: 'pointer', borderRadius: 6,
+                transition: 'background 0.2s ease',
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+              onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}>
               {cmd}
             </button>
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 12 }}>
         <input
           value={content}
           onChange={(e) => onChange(e.target.value)}
@@ -73,15 +75,21 @@ export default function MessageInput({ roomId }: { roomId: string }) {
           }}
           placeholder={mode === 'command' ? 'Type a command...' : `Message #${roomId.slice(0, 8)}...`}
           style={{
-            flex: 1, padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)',
-            background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 14, outline: 'none',
+            flex: 1, padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)',
+            background: 'rgba(0, 0, 0, 0.3)', color: 'var(--text-primary)', fontSize: 15, outline: 'none',
+            boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)', transition: 'all 0.3s ease'
           }}
+          onFocus={(e) => { e.target.style.borderColor = 'hsl(var(--secondary))'; e.target.style.background = 'rgba(0,0,0,0.5)' }}
+          onBlur={(e) => { e.target.style.borderColor = 'rgba(255,255,255,0.1)'; e.target.style.background = 'rgba(0,0,0,0.3)' }}
         />
         <button onClick={send}
           style={{
-            padding: '9px 18px', borderRadius: 8, background: 'var(--accent)', color: '#fff',
-            border: 'none', cursor: 'pointer', fontWeight: 500, fontSize: 14,
-          }}>
+            padding: '0 24px', borderRadius: 12, background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)))', color: '#fff',
+            border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 15, boxShadow: '0 4px 15px rgba(var(--primary), 0.3)', transition: 'transform 0.2s, filter 0.2s'
+          }}
+          onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.filter = 'brightness(1.1)'; }}
+          onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.filter = 'brightness(1)'; }}
+          onMouseDown={(e) => e.currentTarget.style.transform = 'translateY(1px)'}>
           Send
         </button>
       </div>
