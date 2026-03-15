@@ -9,6 +9,8 @@ import MessageList from '../../../components/chat/MessageList';
 import MessageInput from '../../../components/chat/MessageInput';
 import RoomHeader from '../../../components/chat/RoomHeader';
 import { useSocket } from '../../../hooks/useSocket';
+import { useRoom } from '../../../hooks/useRoom';
+import UserList from '../../../components/sidebar/UserList';
 
 export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -37,11 +39,16 @@ export default function RoomPage() {
     enabled: !!roomId,
   });
 
+  const { members } = useRoom(roomId);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <RoomHeader room={room} roomId={roomId} />
-      <MessageList roomId={roomId} />
-      <MessageInput roomId={roomId} />
+    <div style={{ display: 'flex', height: '100%', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1, minWidth: 0 }}>
+        <RoomHeader room={room} roomId={roomId} />
+        <MessageList roomId={roomId} />
+        <MessageInput roomId={roomId} />
+      </div>
+      <UserList members={members} />
     </div>
   );
 }

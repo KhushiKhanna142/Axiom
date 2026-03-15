@@ -8,6 +8,7 @@ import { useChatStore } from '../../store/chat.store';
 import Badge from '../ui/Badge';
 import OnlineDot from './OnlineDot';
 import CreateRoomModal from '../admin/CreateRoomModal';
+import RoomList from './RoomList';
 
 export default function Sidebar() {
   const { user, clearAuth } = useAuthStore();
@@ -35,57 +36,33 @@ export default function Sidebar() {
 
   return (
     <>
-      <div style={{ width: 280, display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)', flexShrink: 0, backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+      <div style={{ width: 260, display: 'flex', flexDirection: 'column', height: '100%',
+        background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)', flexShrink: 0 }}>
         {/* Header */}
-        <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 700, fontSize: 18, background: 'linear-gradient(135deg, hsl(var(--secondary)), hsl(var(--primary)))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-            Axiom
-          </span>
+        <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>Axiom</span>
           <OnlineDot online={true} />
         </div>
-
-        {/* Room list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 12px 10px' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--text-muted)' }}>Rooms</span>
-            {canCreate && (
-              <button onClick={() => setShowCreate(true)}
-                style={{ fontSize: 11, fontWeight: 600, color: 'hsl(var(--secondary))', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s ease' }}>
-                + NEW
-              </button>
-            )}
-          </div>
-          {rooms.map((room) => {
-            const active = pathname === `/chat/${room.id}`;
-            return (
-              <Link key={room.id} href={`/chat/${room.id}`}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 14, fontWeight: active ? 600 : 500,
-                  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  background: active ? 'var(--accent-bg)' : 'transparent',
-                  borderLeft: active ? '3px solid hsl(var(--primary))' : '3px solid transparent',
-                  borderRadius: 6, margin: '2px 0', textDecoration: 'none', transition: 'all 0.2s ease'
-                }}>
-                <span style={{ opacity: active ? 0.8 : 0.4, color: active ? 'hsl(var(--primary))' : 'inherit' }}>#</span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{room.name}</span>
-              </Link>
-            );
-          })}
-        </div>
-
+        
+        {/* Room list using new Component */}
+        <RoomList
+          rooms={rooms}
+          activeRoomId={pathname.split('/chat/')[1] || null}
+          onRoomSelect={(roomId) => router.push(`/chat/${roomId}`)}
+          canCreate={!!canCreate}
+          onCreateClick={() => setShowCreate(true)}
+        />
+        
         {/* User panel */}
-        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff', flexShrink: 0, boxShadow: '0 4px 10px rgba(var(--primary), 0.3)' }}>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#fff', flexShrink: 0 }}>
             {user?.username?.[0]?.toUpperCase()}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.username}</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.username}</div>
             <Badge role={user?.role} />
           </div>
-          <button onClick={handleLogout}
-            style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s ease' }}>
-            OUT
-          </button>
+          <button onClick={handleLogout} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>Out</button>
         </div>
       </div>
       {showCreate && <CreateRoomModal onClose={() => setShowCreate(false)} />}

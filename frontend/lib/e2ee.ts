@@ -4,7 +4,7 @@ import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-ut
 export function encryptDM(message: string, recipientPublicKey: string, senderSecretKey: string) {
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
   const encrypted = nacl.box(
-    encodeUTF8(message),
+    decodeUTF8(message),
     nonce,
     decodeBase64(recipientPublicKey),
     decodeBase64(senderSecretKey)
@@ -25,7 +25,7 @@ export function decryptDM(
       decodeBase64(senderPublicKey),
       decodeBase64(mySecretKey)
     );
-    return dec ? decodeUTF8(dec) : null;
+    return dec ? encodeUTF8(dec) : null;
   } catch {
     return null;
   }
