@@ -1,5 +1,7 @@
 # Axiom
 
+🔗 **Live Demo:** [https://axiom-chat.vercel.app](https://axiom-chat.vercel.app)
+
 **Internal Communications Platform**
 
 Production-grade internal messaging with enforced role hierarchy, real-time delivery, and tamper-proof blockchain audit trail.
