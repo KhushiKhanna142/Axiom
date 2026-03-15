@@ -33,7 +33,7 @@ export async function changeRole(req: Request, res: Response): Promise<void> {
     const { role } = parse.data;
     await supabase.from('users').update({ role }).eq('id', targetId);
     writeAuditEvent({
-      event: 'ROLE_CHANGE', actorId, targetId,
+      event: 'ROLE_CHANGE', actorId, targetId: targetId as string,
       metadata: { newRole: role, username: target.username },
     }).catch(() => {});
     res.status(200).json({ message: 'Role updated', role });
