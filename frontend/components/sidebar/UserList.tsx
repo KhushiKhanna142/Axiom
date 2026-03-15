@@ -2,7 +2,8 @@ import React from 'react';
 import Badge from '../ui/Badge';
 import OnlineDot from './OnlineDot';
 import Avatar from '../ui/Avatar';
-import { RoomMember } from '../../types';
+import DMPane from '../dm/DMPane';
+import { RoomMember, User } from '../../types';
 
 interface UserListProps {
   members: RoomMember[];
@@ -10,6 +11,8 @@ interface UserListProps {
 }
 
 export default function UserList({ members, title = 'Members' }: UserListProps) {
+  const [activeDmUser, setActiveDmUser] = React.useState<User | null>(null);
+
   if (!members || members.length === 0) {
     return null;
   }
@@ -40,6 +43,15 @@ export default function UserList({ members, title = 'Members' }: UserListProps) 
           {groupMembers.map((member) => (
             <li
               key={member.userId}
+              onClick={() => setActiveDmUser({
+                id: member.userId,
+                username: member.username,
+                role: member.role,
+                isOnline: member.isOnline,
+                email: '', // Not needed for DM Pane UI
+                createdAt: '',
+                lastSeen: '',
+              })}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -102,6 +114,13 @@ export default function UserList({ members, title = 'Members' }: UserListProps) 
         {renderGroup('Online', onlineMembers)}
         {renderGroup('Offline', offlineMembers)}
       </div>
+
+      {activeDmUser && (
+        <DMPane
+          recipient={activeDmUser}
+          onClose={() => setActiveDmUser(null)}
+        />
+      )}
     </div>
   );
 }

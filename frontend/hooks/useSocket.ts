@@ -2,10 +2,12 @@
 import { useEffect } from 'react';
 import { getSocket } from '../lib/socket';
 import { useChatStore } from '../store/chat.store';
-import { Message } from '../types';
+import { useAuthStore } from '../store/auth.store';
+import { Message, DirectMessage } from '../types';
 
 export function useSocket(roomId?: string) {
-  const { addMessage, updatePresence, setTyping } = useChatStore();
+  const { addMessage, addDirectMessage, updatePresence, setTyping } = useChatStore();
+  const { user } = useAuthStore();
 
   useEffect(() => {
     const socket = getSocket();
@@ -25,6 +27,12 @@ export function useSocket(roomId?: string) {
         createdAt: new Date().toISOString(),
       });
     });
+    
+    socket.on('message:dm:new', (msg: DirectMessage) => {
+      // Set the partner ID so the store correctly routes to the user's conversation thread
+      const partnerId = msg.senderId === user?.id ? msg.recipientId : msg.senderId;
+      addDirectMessage({ ...msg, senderId: partnerId }); // Keep routing simple using senderId as partnerId for the store abstraction
+    });
 
     socket.on('presence:update', ({ userId, isOnline }: { userId: string; isOnline: boolean }) => {
       updatePresence(userId, isOnline);
@@ -41,7 +49,7 @@ export function useSocket(roomId?: string) {
     const hb = setInterval(() => socket.emit('presence:heartbeat'), 20000);
 
     return () => {
-      ['message:new', 'system:message', 'presence:update', 'typing:update', 'role:changed', 'room:kicked']
+      ['message:new','system:message','message:dm:new','presence:update','typing:update','role:changed','room:kicked']
         .forEach((e) => socket.off(e));
       clearInterval(hb);
     };

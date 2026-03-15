@@ -115,9 +115,44 @@ export function initSocket(httpServer: any) {
         });
 
         logger.info({ event: 'message.sent', userId: user.userId, roomId, latencyMs: Date.now() - start });
-      } catch (e: any) {
-        socket.emit('error', { code: 'internal_error', message: e.message });
-      }
+      } catch (e: any) { socket.emit('error', { code: 'internal_error', message: e.message }); }
+    });
+
+    // Direct Messaging 
+    socket.on('message:dm', async ({ recipientId, ciphertext, nonce }) => {
+      try {
+        if (!ciphertext || !nonce) return;
+
+        // Verify recipient exists
+        const { data: recipient } = await supabase.from('users').select('id').eq('id', recipientId).single();
+        if (!recipient) { socket.emit('error', { code: 'user_not_found', message: 'Recipient does not exist' }); return; }
+
+        // Store message
+        const { data: msg } = await supabase.from('direct_messages').insert({
+          sender_id: user.userId,
+          recipient_id: recipientId,
+          ciphertext,
+          nonce
+        }).select().single();
+        
+        if (!msg) { socket.emit('error', { code: 'internal_error' }); return; }
+
+        const dmPayload = {
+          id: msg.id,
+          senderId: user.userId,
+          recipientId,
+          ciphertext,
+          nonce,
+          createdAt: msg.created_at
+        };
+
+        // Emit to both sender and recipient
+        io.to(`user:${recipientId}`).emit('message:dm:new', dmPayload);
+        if (socket.id !== recipientId) { // Prevent duplicate local echo via socket if sending to self
+            socket.emit('message:dm:new', dmPayload);
+        }
+
+      } catch (e: any) { socket.emit('error', { code: 'internal_error', message: e.message }); }
     });
 
     socket.on('message:delete', async ({ messageId }) => {
