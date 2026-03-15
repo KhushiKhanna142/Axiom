@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/permission.middleware';
 import { getUsers, changeRole } from '../controllers/user.controller';
@@ -8,10 +8,10 @@ import { supabase } from '../config/supabase';
 
 const r = Router();
 r.use(authMiddleware);
-r.get('/me', (req, res) => res.json({ user: req.user }));
+r.get('/me', (req: Request, res: Response) => res.json({ user: req.user }));
 r.get('/', requireRole('moderator'), getUsers);
 r.patch('/:id/role', requireRole('superadmin'), changeRole);
-r.get('/search', async (req, res) => {
+r.get('/search', async (req: Request, res: Response) => {
   const q = req.query.q as string;
   const { data } = await supabase.from('users')
     .select('id, username, role, public_key')
@@ -19,11 +19,11 @@ r.get('/search', async (req, res) => {
     .limit(10);
   res.json({ users: data || [] });
 });
-r.get('/audit', requireRole('moderator'), async (req, res) => {
+r.get('/audit', requireRole('moderator'), async (req: Request, res: Response) => {
   const events = await getAuditLog(req.query.roomId as string | undefined, 50);
   res.json({ events });
 });
-r.get('/audit/chain', requireRole('superadmin'), async (_req, res) => {
+r.get('/audit/chain', requireRole('superadmin'), async (_req: Request, res: Response) => {
   const events = await getAuditTrailFromChain(20);
   res.json({ events });
 });

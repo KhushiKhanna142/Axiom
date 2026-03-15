@@ -36,7 +36,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10kb' }));
 app.use(rateLimit({ windowMs: 60000, max: 100, standardHeaders: true, legacyHeaders: false }));
 
-app.get('/api/health', async (_, res) => {
+app.get('/api/health', async (_: express.Request, res: express.Response) => {
   const { redis } = await import('./redis/client');
   const { supabase } = await import('./config/supabase');
   const { contract } = await import('./blockchain/service');

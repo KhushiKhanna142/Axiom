@@ -8,7 +8,7 @@ export function requireRole(minGlobalRole: GlobalRole) {
       res.status(401).json({ error: 'unauthorized', message: 'Authentication required' });
       return;
     }
-    if (ROLE_WEIGHT[user.role] < ROLE_WEIGHT[minGlobalRole]) {
+    if (ROLE_WEIGHT[user.role as GlobalRole] < ROLE_WEIGHT[minGlobalRole]) {
       res.status(403).json({ error: 'forbidden', message: 'Insufficient role' });
       return;
     }
