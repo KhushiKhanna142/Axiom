@@ -28,16 +28,18 @@ export function initSocket(httpServer: any) {
   });
 
   io.on('connection', async (socket) => {
+    console.log('NEW SOCKET CONNECTION:', socket.id);
     const user = socket.data.user;
-    logger.info({ event: 'socket.connected', userId: user.userId });
-    await setOnline(user.userId, socket.id);
-    io.emit('presence:update', { userId: user.userId, isOnline: true });
-    socket.join(`user:${user.userId}`); // Personal room for DMs
-
+    
+    // Attach listeners synchronously first to avoid missing early packets!
     socket.on('room:join', async ({ roomId }) => {
+      console.log('--- RECV: room:join ---', { roomId, userId: user.userId });
       try {
-        const { data: member } = await supabase.from('room_members')
+        console.log('Querying member...');
+        const { data: member, error } = await supabase.from('room_members')
           .select('id').eq('room_id', roomId).eq('user_id', user.userId).single();
+        console.log('Member query result:', { member, error });
+        
         if (!member) {
           socket.emit('error', { code: 'not_member', message: 'Join room via API first' });
           return;
@@ -48,7 +50,9 @@ export function initSocket(httpServer: any) {
           user: { id: user.userId, username: user.username, role: user.role },
         });
         logger.info({ event: 'room.joined', userId: user.userId, roomId });
+        console.log('--- DONE: room:join ---');
       } catch (e: any) {
+        console.error('room:join Catch error:', e);
         socket.emit('error', { code: 'internal_error', message: e.message });
       }
     });
@@ -182,6 +186,16 @@ export function initSocket(httpServer: any) {
       io.emit('presence:update', { userId: user.userId, isOnline: false });
       logger.info({ event: 'socket.disconnected', userId: user.userId });
     });
+
+    // Run async side-effects AFTER all event listeners are bound
+    try {
+      logger.info({ event: 'socket.connected', userId: user.userId });
+      await setOnline(user.userId, socket.id);
+      io.emit('presence:update', { userId: user.userId, isOnline: true });
+      socket.join(`user:${user.userId}`); // Personal room for DMs
+    } catch (e) {
+      console.error('Failed to set presence', e);
+    }
   });
 
   return io;
