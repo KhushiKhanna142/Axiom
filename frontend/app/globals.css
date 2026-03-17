@@ -55,6 +55,85 @@ body {
 .msg-row { border-radius: 8px; transition: background 0.2s ease; margin-bottom: 2px; }
 .msg-row:hover { background: rgba(255, 255, 255, 0.03); }
 
+/* ── Glass Panel ── */
+.glass-panel {
+  background: rgba(20, 20, 32, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ── Glass Input ── */
+.glass-input {
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #ffffff !important;
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  caret-color: #ffffff;
+  -webkit-text-fill-color: #ffffff !important;
+}
+.glass-input::placeholder {
+  color: rgba(154, 160, 166, 0.5);
+  -webkit-text-fill-color: rgba(154, 160, 166, 0.5);
+}
+.glass-input:focus {
+  border-color: rgba(179, 102, 255, 0.6);
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 0 3px rgba(179, 102, 255, 0.15);
+}
+/* Override browser autofill yellow background */
+.glass-input:-webkit-autofill,
+.glass-input:-webkit-autofill:hover,
+.glass-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px rgba(30, 20, 50, 0.95) inset;
+  -webkit-text-fill-color: #f8f8f2 !important;
+  border-color: rgba(179, 102, 255, 0.4);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ── Primary Button ── */
+.btn-primary {
+  background: linear-gradient(135deg, hsl(260, 100%, 65%), hsl(190, 100%, 60%));
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 20px rgba(179, 102, 255, 0.35);
+  letter-spacing: 0.3px;
+}
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 28px rgba(179, 102, 255, 0.5);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Gradient Text ── */
+.text-gradient {
+  background: linear-gradient(135deg, hsl(260, 100%, 75%), hsl(190, 100%, 70%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 @keyframes bounce {
   0%, 80%, 100% { transform: translateY(0); }
   40% { transform: translateY(-4px); }

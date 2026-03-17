@@ -39,12 +39,33 @@ export async function register(req: Request, res: Response): Promise<void> {
       return;
     }
     const passwordHash = await bcrypt.hash(password, 12);
-    const kp = generateKeypair();
-    const { encrypted, salt } = await encryptPrivateKey(kp.secretKey, password);
-    const { data: user, error } = await supabase.from('users').insert({
-      username, email, password_hash: passwordHash, role: 'member',
-      public_key: kp.publicKey, encrypted_private_key: encrypted, key_salt: salt,
-    }).select().single();
+
+    // Generate E2EE keypair — fall back gracefully if DB columns not yet migrated
+    let e2eeFields: Record<string, string> = {};
+    try {
+      const kp = generateKeypair();
+      const { encrypted, salt } = await encryptPrivateKey(kp.secretKey, password);
+      e2eeFields = { public_key: kp.publicKey, encrypted_private_key: encrypted, key_salt: salt };
+    } catch (e2eeErr) {
+      logger.warn({ event: 'auth.register.e2ee_skipped', err: String(e2eeErr) });
+    }
+
+    const insertPayload: Record<string, unknown> = {
+      username, email, password_hash: passwordHash, role: 'member', ...e2eeFields,
+    };
+
+    let { data: user, error } = await supabase.from('users').insert(insertPayload).select().single();
+
+    // If E2EE columns are missing in DB (PGRST204), retry without them
+    if (error?.code === 'PGRST204' && Object.keys(e2eeFields).length > 0) {
+      logger.warn({ event: 'auth.register.e2ee_columns_missing', hint: 'Run add_e2ee_columns.sql migration' });
+      const fallback = await supabase.from('users').insert({
+        username, email, password_hash: passwordHash, role: 'member',
+      }).select().single();
+      user = fallback.data;
+      error = fallback.error;
+    }
+
     if (error || !user) {
       console.error('Supabase registration error:', error);
       res.status(500).json({ error: 'internal_error', message: 'Registration failed' });

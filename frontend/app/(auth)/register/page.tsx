@@ -31,7 +31,13 @@ export default function RegisterPage() {
       router.replace('/chat');
       
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed');
+      if (err.response?.data?.details?.fieldErrors) {
+        const errors = err.response.data.details.fieldErrors;
+        const messages = Object.keys(errors).map(key => `${key}: ${errors[key][0]}`).join(', ');
+        setError(`Validation error - ${messages}`);
+      } else {
+        setError(err.response?.data?.message || 'Registration failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -56,15 +62,15 @@ export default function RegisterPage() {
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Username</label>
-            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required className="glass-input" placeholder="coolhacker99" />
+            <input type="text" name="username" value={username} onChange={(e) => setUsername(e.target.value)} required className="glass-input" placeholder="coolhacker99" />
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="glass-input" placeholder="you@axiom.dev" />
+            <input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="glass-input" placeholder="you@axiom.dev" />
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required className="glass-input" placeholder="••••••••" />
+            <input type="password" name="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required className="glass-input" placeholder="••••••••" />
           </div>
           <button type="submit" className="btn-primary" style={{ width: '100%', padding: 14, marginTop: 16 }} disabled={loading}>
             {loading ? 'Creating...' : 'Create Account'}
