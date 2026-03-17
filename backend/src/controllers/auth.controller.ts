@@ -71,6 +71,20 @@ export async function register(req: Request, res: Response): Promise<void> {
       res.status(500).json({ error: 'internal_error', message: 'Registration failed' });
       return;
     }
+
+    // Auto-join the user to a default room (e.g. general) so they can chat immediately
+    try {
+      const { data: defaultRoom } = await supabase.from('rooms').select('id').order('created_at', { ascending: true }).limit(1).single();
+      if (defaultRoom) {
+        await supabase.from('room_members').insert({
+          room_id: defaultRoom.id,
+          user_id: user.id,
+          local_role: 'member'
+        });
+      }
+    } catch (roomErr) {
+      logger.error({ event: 'auth.register.auto_join_failed', err: String(roomErr) });
+    }
     const refreshToken = signRefreshToken({ userId: user.id });
     await supabase.from('users').update({ refresh_token: refreshToken }).eq('id', user.id);
     const accessToken = signAccessToken({ userId: user.id, username: user.username, role: user.role });
